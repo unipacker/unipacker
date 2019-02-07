@@ -26,3 +26,12 @@ platform independent automatic unpacking by using emulation.
 - **[ASPack](http://www.aspack.com/)**: Advanced commercial packer with a high compression ratio
 - **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
 - **FSG**: Freeware, fast to unpack
+
+## Usage
+Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/VirusTotal/yara)
+```
+pip install -r requirements.txt
+python3 unipacker.py
+```
+You will be presented with the file opening prompt. Afterwards you land in the Un{i}packer shell where you can control
+the emulation. For more information on available commands refer to the ```help``` command.
