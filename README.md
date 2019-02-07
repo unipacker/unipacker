@@ -8,7 +8,7 @@
                               |_|
 
 # Un{i}packer
-## Unpacking PE files via emulation
+## Unpacking PE files using Unicorn Engine
 
 The usage of runtime packers by malware authors is very common, as it is a technique that helps to hinder analysis.
 Furthermore, packers are a challenge for antivirus products, as they make it impossible to identify malware by signatures
