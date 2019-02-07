@@ -1,0 +1,24 @@
+UPX:
+    Lab18-01.exe uses a slightly modified version of UPX.
+    Section names changed: instead of UPX0 and UPX1, .text and UPX2 are used. For this reason UPX -d fails, but
+    un{i}packer can still unpack it.
+    This is a malware sample from the exercises of the book "Practical Malware Analysis".
+
+    upx_wcry_honey.exe is a WannaCry sample collected with our own honeypot and packed by ourselves.
+    Caution: this is a really big file compared to the others, so it will take ages to unpack
+
+    honey_upx_blue.exe is a blouiroet sample obtained by our honeypot
+    honey_upx_zombie.exe is a ZombieBoy sample
+
+PEtite:
+    UnPackMe_Petite1.4.exe is an unpacking challenge we found on tuts4you.com. It includes the ElDorado malware
+    and also displays some messages, depending on whether it was unpacked successfully or not. After unpacking, a
+    congratulations string is visible in the dump
+
+FSG:
+    Lab18-02.exe is another sample from "Practical Malware Analysis", this time packed with the "fast simple good" packer
+
+ASPack:
+    honey_blue.exe is blouiroet
+    honey_zombie.exe is ZombieBoy
+    honey_wcry.exe is WannaCry. Caution again: the WannaCry sample will also take very long here
