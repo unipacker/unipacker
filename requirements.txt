@@ -1,4 +1,4 @@
-r2pipe==1.2.0
-yara-python==3.8.1
-pefile==2018.8.8
-unicorn==1.0.1
+r2pipe
+yara-python
+pefile
+unicorn
