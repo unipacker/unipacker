@@ -25,13 +25,13 @@ platform independent automatic unpacking by using emulation.
 - **[UPX](https://github.com/upx/upx)**: Cross-platform, open source packer
 - **[ASPack](http://www.aspack.com/)**: Advanced commercial packer with a high compression ratio
 - **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
-- **FSG**: Freeware, fast to unpack
+- **[FSG](https://www.aldeid.com/wiki/Category:Digital-Forensics/Computer-Forensics/Anti-Reverse-Engineering/Packers/FSG)**: Freeware, fast to unpack
 
 ## Usage
 Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/VirusTotal/yara)
 ```
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 python3 unipacker.py
 ```
-You will be presented with the file opening prompt. Afterwards you land in the Un{i}packer shell where you can control
+You will then be presented with the file opening prompt. After selecting a sample, you land in the Un{i}packer shell where you can control
 the emulation. For more information on available commands refer to the ```help``` command.
