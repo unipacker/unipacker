@@ -396,6 +396,7 @@ deleted this time."""
         if not args:
             breakpoints.clear()
             mem_breakpoints.clear()
+            apicall_handler.pending_breakpoints.clear()
         for arg in args.split(" "):
             if not arg:
                 continue
@@ -535,7 +536,7 @@ details on this representation)"""
             shell_event.clear()
             emulator_event.set()
             shell_event.wait()
-        with open("bye_fortunes") as f:
+        with open("fortunes") as f:
             fortunes = f.read().splitlines()
         print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
         raise SystemExit
@@ -970,7 +971,7 @@ def init_sample(show_fortune=True):
             write_execute_control = unpacker.write_execute_control
 
         if show_fortune:
-            with open("hello_fortunes") as f:
+            with open("fortunes") as f:
                 fortunes = f.read().splitlines()
             print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
         else:
@@ -983,7 +984,7 @@ def init_sample(show_fortune=True):
         if not allowed_addr_ranges:
             section_hopping_control = False
     except EOFError:
-        with open("bye_fortunes") as f:
+        with open("fortunes") as f:
             fortunes = f.read().splitlines()
         print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
         sys.exit(0)
