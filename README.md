@@ -33,5 +33,5 @@ Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/Vi
 pip3 install -r requirements.txt
 python3 unipacker.py
 ```
-You will then be presented with the file opening prompt. After selecting a sample, you land in the Un{i}packer shell where you can control
-the emulation. For more information on available commands refer to the ```help``` command.
+For detailed instructions on how to use Un{i}packer please refer to the [Wiki](https://github.com/unipacker/unipacker/wiki).
+Additionally, all of the shell commands are documented. To access this information, use the ```help``` command
