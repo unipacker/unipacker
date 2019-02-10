@@ -27,6 +27,11 @@ platform independent automatic unpacking by using emulation.
 - **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
 - **[FSG](https://www.aldeid.com/wiki/Category:Digital-Forensics/Computer-Forensics/Anti-Reverse-Engineering/Packers/FSG)**: Freeware, fast to unpack
 
+Any other packers should work as well, as long as the needed API functions are implemented in Un{i}packer. For packers that
+aren't specifically known you will be asked whether you would like to manually specify the start and end addresses for emulation.
+If you would like to start at the entry point declared in the PE header and just emulate until section hopping is detected,
+press ```Enter```
+
 ## Usage
 Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/VirusTotal/yara)
 ```
