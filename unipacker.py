@@ -16,8 +16,7 @@ from unicorn.x86_const import *
 from apicalls import WinApiCalls
 from unpackers import get_unpacker
 
-imports = {}
-dlls = {}
+imports = set()
 mu = None
 counter = 0
 virtualmemorysize = 0
@@ -138,10 +137,8 @@ Show current breakpoints:   b"""
                     print(f"Error parsing address or range {arg}")
             elif "$" == arg[0]:
                 arg = arg[1:]
-                if arg in imports.values():
-                    code_targets += [HOOK_ADDR + 4]
-                elif arg in apicall_handler.dynamic_hooks.values():
-                    for addr, func_name in apicall_handler.dynamic_hooks.items():
+                if arg in apicall_handler.hooks.values():
+                    for addr, func_name in apicall_handler.hooks.items():
                         if arg == func_name:
                             code_targets += [addr]
                             break
@@ -415,10 +412,8 @@ deleted this time."""
                     print(f"Error parsing address or range {arg}")
             elif "$" == arg[0]:
                 arg = arg[1:]
-                if arg in imports.values():
-                    code_targets += [HOOK_ADDR + 4]
-                elif arg in apicall_handler.dynamic_hooks.values():
-                    for addr, func_name in apicall_handler.dynamic_hooks.items():
+                if arg in apicall_handler.hooks.values():
+                    for addr, func_name in apicall_handler.hooks.items():
                         if arg == func_name:
                             code_targets += [addr]
                             break
@@ -552,8 +547,8 @@ details on this representation)"""
 def try_parse_address(addr):
     if addr == HOOK_ADDR + 4:
         return f"0x{addr:02x} (static imports)"
-    if addr in apicall_handler.dynamic_hooks:
-        return f"0x{addr:02x} ({apicall_handler.dynamic_hooks[addr]})"
+    if addr in apicall_handler.hooks:
+        return f"0x{addr:02x} ({apicall_handler.hooks[addr]})"
     return f"0x{addr:02x}"
 
 
@@ -632,21 +627,23 @@ def print_stack(uc, elements):
 
 
 def print_imports(args):
-    print("\n\x1b[31mStatic imports:\x1b[0m")
-    lines = []
-    for addr, name in imports.items():
-        lines += [(f"0x{addr:02x}", name, dlls[addr])]
-    print_cols(lines)
+    lines_static = []
+    lines_dynamic = []
 
-    print("\n\x1b[31mDynamic imports:\x1b[0m")
-    lines = []
-    for addr, name in apicall_handler.dynamic_hooks.items():
+    for addr, name in apicall_handler.hooks.items():
         try:
             module = apicall_handler.module_for_function[name]
         except KeyError:
             module = "?"
-        lines += [(f"0x{addr:02x}", name, module)]
-    print_cols(lines)
+        if name in imports:
+            lines_static += [(f"0x{addr:02x}", name, module)]
+        else:
+            lines_dynamic += [(f"0x{addr:02x}", name, module)]
+
+    print("\n\x1b[31mStatic imports:\x1b[0m")
+    print_cols(lines_static)
+    print("\n\x1b[31mDynamic imports:\x1b[0m")
+    print_cols(lines_dynamic)
 
 
 def print_stats():
@@ -687,14 +684,14 @@ def hook_code(uc, address, size, user_data):
         print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
         pause_emu()
 
-    if write_execute_control and address not in apicall_handler.dynamic_hooks and (
+    if write_execute_control and address not in apicall_handler.hooks and (
             address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
         if any(lower <= address <= upper for (lower, upper) in sorted(write_targets)):
             print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
             dump_image()
             pause_emu()
 
-    if section_hopping_control and address not in apicall_handler.dynamic_hooks and (
+    if section_hopping_control and address not in apicall_handler.hooks and (
             address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
         allowed = False
         for start, end in allowed_addr_ranges:
@@ -717,33 +714,19 @@ def hook_code(uc, address, size, user_data):
     else:
         sections_executed[curr_section] += 1
 
-    if address == HOOK_ADDR + 4:
+    if address in apicall_handler.hooks:
         esp = uc.reg_read(UC_X86_REG_ESP)
+        api_call_name = apicall_handler.hooks[address]
         ret = 0
-        if imp in apicall_handler.apicall_mapping:
-            ret, esp = apicall_handler.apicall(imp, uc, esp, log_syscalls)
+        if api_call_name in apicall_handler.apicall_mapping:
+            ret, esp = apicall_handler.apicall(apicall_handler.hooks[address], uc, esp, log_syscalls)
         else:
             args = struct.unpack("<IIIIII", uc.mem_read(esp + 4, 24))
-            print(f"Unmapped syscall at 0x{address:02x}: {imp}, first 6 stack items: {list(map(hex, args))}")
-        if imp not in api_calls:
-            api_calls[imp] = 1
+            print(f"Unimplemented API call at 0x{address:02x}: {api_call_name}, first 6 stack items: {list(map(hex, args))}")
+        if api_call_name not in api_calls:
+            api_calls[api_call_name] = 1
         else:
-            api_calls[imp] += 1
-        uc.mem_write(HOOK_ADDR, struct.pack("<I", ret))
-        uc.reg_write(UC_X86_REG_ESP, esp)
-    elif address in apicall_handler.dynamic_hooks:
-        esp = uc.reg_read(UC_X86_REG_ESP)
-        syscall_name = apicall_handler.dynamic_hooks[address]
-        ret = 0
-        if syscall_name in apicall_handler.apicall_mapping:
-            ret, esp = apicall_handler.apicall(apicall_handler.dynamic_hooks[address], uc, esp, log_syscalls)
-        else:
-            args = struct.unpack("<IIIIII", uc.mem_read(esp + 4, 24))
-            print(f"Unmapped dynamic syscall at 0x{address:02x}: {syscall_name}, first 6 stack items: {list(map(hex, args))}")
-        if syscall_name not in api_calls:
-            api_calls[syscall_name] = 1
-        else:
-            api_calls[syscall_name] += 1
+            api_calls[api_call_name] += 1
         uc.mem_write(HOOK_ADDR, struct.pack("<I", ret))
         uc.reg_write(UC_X86_REG_ESP, esp)
     log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
@@ -792,7 +775,7 @@ def merge(ranges):
 
 # Method is executed before memory access
 def hook_mem_access(uc, access, address, size, value, user_data):
-    global imp, write_targets
+    global write_targets
     curr_section = unpacker.get_section(address)
     access_type = ""
     if access == UC_MEM_READ:
@@ -802,8 +785,6 @@ def hook_mem_access(uc, access, address, size, value, user_data):
         else:
             sections_read[curr_section] += 1
         log_mem_read and print(">>> Memory is being READ at 0x%x, data size = %u" % (address, size))
-        if address in imports:
-            imp = imports[address]
     elif access == UC_MEM_WRITE:
         access_type = "WRITE"
         write_targets = list(merge(write_targets + [(address, address + size)]))
@@ -884,6 +865,7 @@ def init_uc():
     STACK_START = STACK_ADDR + STACK_SIZE
     unpacker.secs += [{"name": "stack", "vaddr": STACK_ADDR, "vsize": STACK_SIZE}]
     HOOK_ADDR = STACK_START + 0x3000 + 0x1000
+
     # Start unicorn emulator with x86-32bit architecture
     mu = Uc(UC_ARCH_X86, UC_MODE_32)
     if startaddr is None:
@@ -892,6 +874,7 @@ def init_uc():
     virtualmemorysize = len(loaded)
     mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000))
     mu.mem_write(BASE_ADDR, loaded)
+
     # initialize machine registers
     mu.mem_map(STACK_ADDR, STACK_SIZE)
     mu.reg_write(UC_X86_REG_ESP, STACK_ADDR + int(STACK_SIZE / 2))
@@ -901,6 +884,7 @@ def init_uc():
     mu.reg_write(UC_X86_REG_EDX, startaddr)
     mu.reg_write(UC_X86_REG_ESI, startaddr)
     mu.reg_write(UC_X86_REG_EDI, startaddr)
+
     # init syscall handling and prepare hook memory for return values
     apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample)
     mu.mem_map(HOOK_ADDR, 0x1000)
@@ -908,12 +892,14 @@ def init_uc():
     hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', HOOK_ADDR) + bytes.fromhex(
         'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
     mu.mem_write(HOOK_ADDR, hexstr)
+
     # handle imports
     for lib in pe.DIRECTORY_ENTRY_IMPORT:
         for func in lib.imports:
-            mu.mem_write(func.address, struct.pack('<I', HOOK_ADDR + 4))
-            dlls[func.address] = lib.dll.decode()
-            imports[func.address] = func.name.decode()
+            imports.add(func.name.decode())
+            curr_hook_addr = apicall_handler.add_hook(mu, func.name.decode(), lib.dll.decode())
+            mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
+
     # Add hooks
     mu.hook_add(UC_HOOK_CODE, hook_code)
     mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE | UC_HOOK_MEM_FETCH, hook_mem_access)

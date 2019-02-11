@@ -21,8 +21,8 @@ class WinApiCalls(object):
         self.base_addr = base_addr
         self.virtualmemorysize = virtualmemorysize
         self.hook_addr = hook_addr
-        self.dynamic_hook_offset = 12
-        self.dynamic_hooks = {}
+        self.next_hook_offset = 4
+        self.hooks = {}
         self.module_handle_offset = 0
         self.module_handles = {}
         self.module_for_function = {}
@@ -130,10 +130,19 @@ class WinApiCalls(object):
             module_name = "?"
         log and print(
             f"GetProcAddress: 0x{eip:02x} module handle 0x{module_handle:02x}: {module_name}, proc_name_ptr 0x{proc_name_ptr}: {proc_name}")
-        hook_addr = self.add_hook(uc, proc_name, module_name)
+
+        hook_addr = None
+        for addr, name in self.hooks.items():
+            if name == proc_name:
+                hook_addr = addr
+                log and print(f"\tRe-used previously added hook at 0x{hook_addr:02x}")
+        if hook_addr is None:
+            hook_addr = self.add_hook(uc, proc_name, module_name)
+            log and print(f"\tAdded new hook at 0x{hook_addr:02x}")
         if proc_name in self.pending_breakpoints:
             print(f"Pending breakpoint attached for new dynamic import {proc_name} at 0x{hook_addr:02x}")
             self.breakpoints.add(hook_addr)
+            self.pending_breakpoints.remove(proc_name)
         uc.mem_write(esp + 8, struct.pack("<I", eip))
         return hook_addr, esp + 8
 
@@ -146,16 +155,17 @@ class WinApiCalls(object):
         handle = self.base_addr + self.module_handle_offset
         self.module_handle_offset += 1
         self.module_handles[handle] = self.get_string(mod_name_ptr, uc)
+        log and print(f"\tHandle: 0x{handle:02x}")
         return handle, esp + 4
 
     def add_hook(self, uc, name, module_name):
-        curr_hook_addr = self.hook_addr + self.dynamic_hook_offset
+        curr_hook_addr = self.hook_addr + self.next_hook_offset
         hexstr = bytes.fromhex('8b0425') + struct.pack('<I', self.hook_addr) + bytes.fromhex(
             'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
         uc.mem_write(curr_hook_addr, hexstr)
-        self.dynamic_hooks[curr_hook_addr] = name
+        self.hooks[curr_hook_addr] = name
         self.module_for_function[name] = module_name
-        self.dynamic_hook_offset += len(hexstr)
+        self.next_hook_offset += len(hexstr)
         return curr_hook_addr
 
     def register_pending_breakpoint(self, target):
