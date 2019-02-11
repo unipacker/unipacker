@@ -15,6 +15,7 @@ from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
 from unpackers import get_unpacker
+from utils import print_cols, merge, align, remove_range
 
 imports = set()
 mu = None
@@ -435,20 +436,7 @@ deleted this time."""
             new_mem_breakpoints = []
             for b_lower, b_upper in mem_breakpoints:
                 for t_lower, t_upper in mem_targets:
-                    if b_lower == t_lower and b_upper == t_upper:
-                        continue
-                    elif b_lower < t_lower and b_upper > t_upper:
-                        # deleted range is inside breakpoint range
-                        new_mem_breakpoints += [(b_lower, t_lower - 1), (t_upper + 1, b_upper)]
-                    elif t_lower <= b_lower and b_upper > t_upper:
-                        # only deleted range upper limit is inside breakpoint range
-                        new_mem_breakpoints += [(t_upper + 1, b_upper)]
-                    elif b_lower < t_lower and t_upper >= b_upper:
-                        # only lower limit is inside breakpoint range
-                        new_mem_breakpoints += [(b_lower, t_lower - 1)]
-                    else:
-                        # breakpoint range unaffected
-                        new_mem_breakpoints += [(b_lower, b_upper)]
+                    new_mem_breakpoints += remove_range((b_lower, b_upper), (t_lower, t_upper))
             mem_breakpoints = list(merge(new_mem_breakpoints))
             self.print_breakpoints()
 
@@ -545,8 +533,6 @@ details on this representation)"""
 
 
 def try_parse_address(addr):
-    if addr == HOOK_ADDR + 4:
-        return f"0x{addr:02x} (static imports)"
     if addr in apicall_handler.hooks:
         return f"0x{addr:02x} ({apicall_handler.hooks[addr]})"
     return f"0x{addr:02x}"
@@ -661,13 +647,6 @@ def print_stats():
     print_cols([(name, amount) for name, amount in sections_written.items()])
 
 
-def print_cols(lines):
-    cols = zip(*lines)
-    col_widths = [max(len(str(word)) for word in col) + 2 for col in cols]
-    for line in lines:
-        print("".join(str(word).ljust(col_widths[i]) for i, word in enumerate(line)))
-
-
 def hook_code(uc, address, size, user_data):
     global allowed_addr_ranges
     shell.update_prompt(address)
@@ -759,20 +738,6 @@ def dump_image(path="unpacked.dump"):
         f.write(tmp)
 
 
-def merge(ranges):
-    if not ranges:
-        return []
-    saved = list(ranges[0])
-    for lower, upper in sorted([sorted(t) for t in ranges]):
-        if lower <= saved[1] + 1:
-            saved[1] = max(saved[1], upper)
-        else:
-            yield tuple(saved)
-            saved[0] = lower
-            saved[1] = upper
-    yield tuple(saved)
-
-
 # Method is executed before memory access
 def hook_mem_access(uc, access, address, size, value, user_data):
     global write_targets
@@ -810,14 +775,6 @@ def hook_mem_invalid(uc, access, address, size, value, user_data):
             print(f"Invalid memory access {access_name}, addr: 0x{address:02x}")
             mu.emu_stop()
             return
-
-
-def align(value):
-    padding = 4 * 1024
-    m = value % padding
-    f = padding - m
-    aligned_size = value + f
-    return aligned_size
 
 
 def emu():
@@ -872,7 +829,7 @@ def init_uc():
         startaddr = entrypoint(pe)
     loaded = pe.get_memory_mapped_image(ImageBase=BASE_ADDR)
     virtualmemorysize = len(loaded)
-    mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000))
+    mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000, page_size=4096))
     mu.mem_write(BASE_ADDR, loaded)
 
     # initialize machine registers

@@ -3,6 +3,8 @@ import struct
 import pefile
 from unicorn.x86_const import *
 
+from utils import align, merge, remove_range, print_cols
+
 
 class WinApiCalls(object):
 
@@ -27,7 +29,8 @@ class WinApiCalls(object):
         self.module_handles = {}
         self.module_for_function = {}
         self.dynamic_mem_offset = 0x4000
-        self.alloc_size = {}
+        self.allocated_chunks = []
+        self.alloc_sizes = {}
         self.pending_breakpoints = set()
         self.breakpoints = breakpoints
         self.sample = sample
@@ -98,28 +101,54 @@ class WinApiCalls(object):
             return 0, esp + 16
 
     def alloc(self, log, size, uc):
-        padding = 4 * 1024
-        m = size % padding
-        f = padding - m
-        aligned_size = size + f
-        log and print(f"\tUnaligned size: {size:02x}, by {m:02x} bytes. Aligned size: {aligned_size:02x}")
+        page_size = 4 * 1024
+        aligned_size = align(size, page_size)
+        log and print(f"\tUnaligned size: 0x{size:02x}, aligned size: 0x{aligned_size:02x}")
         new_offset = self.base_addr + self.virtualmemorysize + self.dynamic_mem_offset
-        self.dynamic_mem_offset += aligned_size + 0x1000
-        new_offset_m = new_offset % padding
+        self.dynamic_mem_offset += aligned_size
+        new_offset_m = new_offset % page_size
         aligned_address = new_offset - new_offset_m
         uc.mem_map(aligned_address, aligned_size)
-        log and print(f"\tfrom {aligned_address:02x} to {(aligned_address + aligned_size):02x}")
-        self.alloc_size[aligned_address] = aligned_size
+        log and print(f"\tfrom 0x{aligned_address:02x} to 0x{(aligned_address + aligned_size):02x}")
+        self.allocated_chunks = list(merge(self.allocated_chunks + [(aligned_address, aligned_address + aligned_size)]))
+        log and self.print_allocs()
+        self.alloc_sizes[aligned_address] = aligned_size
         return aligned_address
 
     def VirtualFree(self, uc, esp, log):
         eip, address, size, free_type = struct.unpack("<IIII", uc.mem_read(esp, 16))
+        log and print(f"VirtualFree: 0x{eip:02x}, chunk to free: 0x{address:02x}, size 0x{size:02x}, type 0x{free_type:02x}")
         uc.mem_write(esp + 12, struct.pack("<I", eip))
-        if address not in self.alloc_size:
-            return 0, esp + 12
-        else:
-            uc.mem_unmap(address, self.alloc_size[address])
+        new_chunks = []
+        success = False
+        for start, end in sorted(self.allocated_chunks):
+            if start <= address <= end:
+                if free_type & 0x8000 and size == 0:  # MEM_RELEASE, clear whole allocated range
+                    if address in self.alloc_sizes:
+                        end_addr = self.alloc_sizes[address]
+                        uc.mem_unmap(address, end_addr)
+                        new_chunks += remove_range((start, end), (address, end_addr))
+                        success = True
+                    else:
+                        log and print(f"\t0x{address} is not an alloc base address!")
+                        new_chunks += [(start, end)]
+                elif free_type & 0x4000 and size > 0:  # MEM_DECOMMIT, free requested size
+                    end_addr = address + align(size)
+                    uc.mem_unmap(address, end_addr)
+                    new_chunks += remove_range((start, end), (address, end_addr))
+                    success = True
+                else:
+                    log and print("\tIncorrect size + type combination!")
+                    new_chunks += [(start, end)]
+            else:
+                new_chunks += [(start, end)]
+
+        self.allocated_chunks = list(merge(new_chunks))
+        log and self.print_allocs()
+        if success:
             return 1, esp + 12
+        log and print("\tAddress range not allocated!")
+        return 0, esp + 12
 
     def GetProcAddress(self, uc, esp, log):
         eip, module_handle, proc_name_ptr = struct.unpack("<III", uc.mem_read(esp, 12))
@@ -140,7 +169,7 @@ class WinApiCalls(object):
             hook_addr = self.add_hook(uc, proc_name, module_name)
             log and print(f"\tAdded new hook at 0x{hook_addr:02x}")
         if proc_name in self.pending_breakpoints:
-            print(f"Pending breakpoint attached for new dynamic import {proc_name} at 0x{hook_addr:02x}")
+            print(f"\x1b[31mPending breakpoint attached for new dynamic import {proc_name} at 0x{hook_addr:02x}\x1b[0m")
             self.breakpoints.add(hook_addr)
             self.pending_breakpoints.remove(proc_name)
         uc.mem_write(esp + 8, struct.pack("<I", eip))
@@ -170,3 +199,10 @@ class WinApiCalls(object):
 
     def register_pending_breakpoint(self, target):
         self.pending_breakpoints.add(target)
+
+    def print_allocs(self):
+        print("Currently allocated:")
+        lines = []
+        for start, end in self.allocated_chunks:
+            lines += [(hex(start), "-", hex(end))]
+        print_cols(lines)
