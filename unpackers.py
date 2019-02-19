@@ -43,11 +43,8 @@ class DefaultUnpacker(object):
         return startaddr
 
     def get_allowed_addr_ranges(self):
-        r2 = r2pipe.open(self.sample)
-        sections = r2.cmdj("Sj")
-        r2.quit()
         allowed_ranges = []
-        for s in sections:
+        for s in self.secs:
             if 'name' in s:
                 if s['name'] in self.allowed_sections:
                     start_addr = s['vaddr']
@@ -115,8 +112,7 @@ class UPXUnpacker(DefaultUnpacker):
 
 
     def get_vaddr_of_section(self, r2, section):
-        sections = r2.cmdj("Sj")
-        for i in sections:
+        for i in self.secs:
             if 'name' in i:
                 if section == i['name']:
                     start_addr = i['vaddr']

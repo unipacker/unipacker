@@ -540,7 +540,7 @@ def try_parse_address(addr):
 
 def getVirtualMemorySize(sample):
     r2 = r2pipe.open(sample)
-    sections = r2.cmdj("Sj")
+    sections = r2.cmdj("iSj")
     total_size = 0
     for sec in sections:
         if 'vsize' in sec:
