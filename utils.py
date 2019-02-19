@@ -1,3 +1,6 @@
+import struct
+
+
 def print_cols(lines):
     cols = zip(*lines)
     col_widths = [max(len(str(word)) for word in col) + 2 for col in cols]
@@ -42,3 +45,32 @@ def remove_range(old_range, to_remove):
         return [(old_lower, remove_lower - 1)]
     # range unaffected
     return [(old_lower, old_upper)]
+
+
+def get_string(ptr, uc):
+    buf = ""
+    i = 0
+    while True:
+        item, = struct.unpack("c", uc.mem_read(ptr + i, 1))
+        if item == b"\x00":
+            break
+        buf += chr(item[0])
+        i += 1
+    return buf
+
+
+def fix_ep(uc, new_ep, base_addr):
+    pe_header_ptr, = struct.unpack("<I", uc.mem_read(base_addr + 0x3c, 4))
+    file_header_pad = "x" * 20
+    optional_pad = "x" * 16
+    total_pad = "xx" + file_header_pad + optional_pad
+    ep, = struct.unpack(f"{total_pad}I", uc.mem_read(base_addr + pe_header_ptr, 44))
+    print(f"Original EP 0x{base_addr + ep:02x} is overwritten with 0x{base_addr + new_ep:02x}")
+    uc.mem_write(base_addr + pe_header_ptr + len(total_pad) + 2, struct.pack("I", new_ep))
+
+
+def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.dump"):
+    print(f"Dumping state to {path}")
+    with open(path, 'wb') as f:
+        tmp = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
+        f.write(tmp)

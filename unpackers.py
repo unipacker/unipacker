@@ -1,7 +1,9 @@
 import sys
-import yara
 
 import r2pipe
+import yara
+
+from utils import fix_ep, dump_image
 
 
 class DefaultUnpacker(object):
@@ -15,6 +17,8 @@ class DefaultUnpacker(object):
         self.allowed_sections = [s["name"] for s in self.secs if
                                  "vaddr" in s and "name" in s and s["vaddr"] <= ep < s["vaddr"] + s["vsize"]]
         self.write_execute_control = False
+        self.BASE_ADDR = None
+        self.virtualmemorysize = None
 
     def get_tail_jump(self):
         while True:
@@ -42,6 +46,11 @@ class DefaultUnpacker(object):
                 print("Incorrect start address!")
         return startaddr
 
+    def finish(self, uc, address):
+        address = address or self.BASE_ADDR
+        fix_ep(uc, address - self.BASE_ADDR, self.BASE_ADDR)
+        dump_image(uc, self.BASE_ADDR, self.virtualmemorysize)
+
     def get_allowed_addr_ranges(self):
         allowed_ranges = []
         for s in self.secs:
@@ -67,18 +76,18 @@ class DefaultUnpacker(object):
 
 class UPXUnpacker(DefaultUnpacker):
 
-    def get_tail_jump(self):
+    def __init__(self, sample):
+        super().__init__(sample)
+        self.jmp_to_oep, self.oep = self.find_tail_jump()
+
+    def find_tail_jump(self):
         r2 = r2pipe.open(self.sample)
 
         ep = r2.cmdj("iej")[0]['vaddr']
         r2.cmd(f"s {ep}")
 
-
-        upx_saddr, upx_endaddr = self.get_tailjump_helper(r2, ep)
-
-
-        ep = r2.cmdj("iej")[0]['vaddr']
-        r2.cmd(f"s {ep}")
+        upx_section = self.get_section(ep)
+        upx_saddr, upx_endaddr = self.get_section_range(upx_section)
 
         disass_size = upx_endaddr - ep
 
@@ -100,16 +109,8 @@ class UPXUnpacker(DefaultUnpacker):
         print("Jump to OEP was not found!")
         return super().get_tail_jump()
 
-
-    def get_tailjump_helper(self, r2,  ep):
-        section = r2.cmdj("iSj")
-        for s in section:
-            if 'name' in s:
-                start_addr = s['vaddr']
-                end_addr = s['vsize'] + start_addr
-                if start_addr <= ep <= end_addr:
-                    return start_addr, end_addr
-
+    def get_tail_jump(self):
+        return self.jmp_to_oep, self.oep
 
     def get_vaddr_of_section(self, r2, section):
         for i in self.secs:
@@ -121,6 +122,9 @@ class UPXUnpacker(DefaultUnpacker):
 
     def get_entrypoint(self):
         return None
+
+    def finish(self, uc, address):
+        super().finish(uc, self.oep)
 
 
 class PEtiteUnpacker(DefaultUnpacker):
@@ -160,7 +164,6 @@ class FSGUnpacker(DefaultUnpacker):
 
     def get_tail_jump(self):
         return sys.maxsize, None
-
 
 
 def identifypacker(sample, yar):

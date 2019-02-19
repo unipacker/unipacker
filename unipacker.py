@@ -15,7 +15,7 @@ from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
 from unpackers import get_unpacker
-from utils import print_cols, merge, align, remove_range
+from utils import print_cols, merge, align, remove_range, get_string, fix_ep, dump_image
 
 imports = set()
 mu = None
@@ -60,6 +60,7 @@ class Shell(Cmd):
         super().__init__()
         self.emu_started = False
         self.rules = None
+        self.address = None
 
     def do_aaa(self, args):
         """Analyze absolutely all: Show a collection of stats about the current sample"""
@@ -193,7 +194,7 @@ of the loaded image: base address + virtual memory size + 0x3000 (buffer).
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
             args = args or "unpacked.dump"
-            dump_image(args)
+            dump_image(mu, BASE_ADDR, virtualmemorysize, args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
 
@@ -450,14 +451,15 @@ In order to stop this from happening, prepend the address with an exclamation ma
             print("Please provide the desired entry point address")
             return
         subtract_base = "!" != args[0]
+        addr = args[1:] if subtract_base else args
         try:
-            new_ep = int(args[1:], 0)
+            new_ep = int(addr, 0)
             if subtract_base:
                 if new_ep < BASE_ADDR:
                     print(f"Error: 0x{new_ep:02x} is smaller than the base address (0x{BASE_ADDR:02x})")
                     return
                 new_ep -= BASE_ADDR
-            fix_ep(new_ep)
+            fix_ep(mu, new_ep, BASE_ADDR)
         except ValueError:
             print(f"Error parsing address {args}")
 
@@ -508,7 +510,7 @@ details on this representation)"""
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
         else:
             self.rules = yara.compile(filepath=args)
-        dump_image("unpacked.dump")
+        dump_image(mu, BASE_ADDR, virtualmemorysize, "unpacked.dump")
         matches = self.rules.match("unpacked.dump")
         print(", ".join(map(str, matches)))
 
@@ -529,6 +531,7 @@ details on this representation)"""
         self.do_exit(args)
 
     def update_prompt(self, addr):
+        self.address = addr
         shell.prompt = f"\x1b[33m[0x{addr:02x}]> \x1b[0m"
 
 
@@ -584,18 +587,12 @@ def print_regs(args=None):
 def print_mem(uc, base, num_elements, t="int", base_alias=""):
     if not base_alias:
         base_alias = f"0x{base:02x}"
+
+    string = None
     if t == "str":
-        buf = ""
-        i = 0
-        while True:
-            item, = struct.unpack("c", uc.mem_read(base + i, 1))
-            if item == b"\x00":
-                break
-            buf += chr(item[0])
-            i += 1
-        print(f"String @0x{base:02x}: {buf}")
+        string = get_string(base, uc)
         t = "byte"
-        num_elements = len(buf)
+        num_elements = len(string)
 
     types = {
         "byte": ("B", 1),
@@ -605,6 +602,9 @@ def print_mem(uc, base, num_elements, t="int", base_alias=""):
     for i in range(num_elements):
         item, = struct.unpack(fmt, uc.mem_read(base + i * size, size))
         print(f"{base_alias}+{i * 4} = 0x{item:02x}")
+
+    if string is not None:
+        print(f"String @0x{base:02x}: {string}")
 
 
 def print_stack(uc, elements):
@@ -661,13 +661,14 @@ def hook_code(uc, address, size, user_data):
         pause_emu()
     if address == endaddr:
         print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
+        unpacker.finish(uc, address)
         pause_emu()
 
     if write_execute_control and address not in apicall_handler.hooks and (
             address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
         if any(lower <= address <= upper for (lower, upper) in sorted(write_targets)):
             print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
-            dump_image()
+            unpacker.finish(uc, address)
             pause_emu()
 
     if section_hopping_control and address not in apicall_handler.hooks and (
@@ -683,8 +684,7 @@ def hook_code(uc, address, size, user_data):
             curr_section_range = unpacker.get_section_range(sec_name)
             if curr_section_range:
                 allowed_addr_ranges += [unpacker.get_section_range(sec_name)]
-            fix_ep(address)
-            dump_image()
+            unpacker.finish(uc, address)
             pause_emu()
 
     curr_section = unpacker.get_section(address)
@@ -706,7 +706,8 @@ def hook_code(uc, address, size, user_data):
             api_calls[api_call_name] = 1
         else:
             api_calls[api_call_name] += 1
-        uc.mem_write(HOOK_ADDR, struct.pack("<I", ret))
+        if ret is not None:  # might be a void function
+            uc.mem_write(HOOK_ADDR, struct.pack("<I", ret))
         uc.reg_write(UC_X86_REG_ESP, esp)
     log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
     with data_lock:
@@ -718,24 +719,6 @@ def pause_emu():
     emulator_event.clear()
     shell_event.set()
     emulator_event.wait()
-
-
-def fix_ep(addr):
-    pe_header_ptr, = struct.unpack("<I", mu.mem_read(BASE_ADDR + 0x3c, 4))
-    file_header_pad = "x" * 20
-    optional_pad = "x" * 16
-    total_pad = "xx" + file_header_pad + optional_pad
-    ep, = struct.unpack(f"{total_pad}I", mu.mem_read(BASE_ADDR + pe_header_ptr, 44))
-    new_ep = addr - BASE_ADDR
-    print(f"Original EP 0x{BASE_ADDR + ep:02x} is overwritten with 0x{BASE_ADDR + new_ep:02x}")
-    mu.mem_write(BASE_ADDR + pe_header_ptr + len(total_pad) + 2, struct.pack("I", new_ep))
-
-
-def dump_image(path="unpacked.dump"):
-    print(f"Dumping state to {path}")
-    with open(path, 'wb') as f:
-        tmp = mu.mem_read(BASE_ADDR, virtualmemorysize + 0x3000)
-        f.write(tmp)
 
 
 # Method is executed before memory access
@@ -793,19 +776,14 @@ def emu():
         print_regs()
         print()
         print_stats()
-
-        dump_image()
+    except UcError as e:
+        print(f"Error: {e}")
+        dump_image(mu, BASE_ADDR, virtualmemorysize)
         emulator_event.clear()
         shell.emu_started = False
         shell_event.set()
-    except KeyboardInterrupt as k:
-        mu.emu_stop()
-        dump_image()
-        emulator_event.clear()
-        shell_event.set()
-    except UcError as e:
-        print(f"Error: {e}")
-        dump_image()
+    finally:
+        unpacker.finish(mu, shell.address)
         emulator_event.clear()
         shell.emu_started = False
         shell_event.set()
@@ -817,6 +795,7 @@ def init_uc():
     virtualmemorysize = getVirtualMemorySize(sample)
     pe = pefile.PE(sample)
     BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
+    unpacker.BASE_ADDR = BASE_ADDR
     STACK_ADDR = 0x0
     STACK_SIZE = 1024 * 1024
     STACK_START = STACK_ADDR + STACK_SIZE
@@ -829,6 +808,7 @@ def init_uc():
         startaddr = entrypoint(pe)
     loaded = pe.get_memory_mapped_image(ImageBase=BASE_ADDR)
     virtualmemorysize = len(loaded)
+    unpacker.virtualmemorysize = virtualmemorysize
     mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000, page_size=4096))
     mu.mem_write(BASE_ADDR, loaded)
 
@@ -853,8 +833,10 @@ def init_uc():
     # handle imports
     for lib in pe.DIRECTORY_ENTRY_IMPORT:
         for func in lib.imports:
-            imports.add(func.name.decode())
-            curr_hook_addr = apicall_handler.add_hook(mu, func.name.decode(), lib.dll.decode())
+            func_name = func.name.decode() if func.name is not None else f"no name: 0x{func.address:02x}"
+            dll_name = lib.dll.decode() if lib.dll is not None else "-- unknown --"
+            imports.add(func_name)
+            curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
             mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
 
     # Add hooks
