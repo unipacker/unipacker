@@ -96,3 +96,14 @@ rule mew{
     condition:
         pe32 and $mew
 }
+
+
+rule yzpack{
+    meta:
+        description = "YZPack packed file"
+        date = "2019-02-28"
+    strings:
+        $yz = ".yzpack"
+    condition:
+        pe32 and $yz
+}
