@@ -166,6 +166,17 @@ class FSGUnpacker(DefaultUnpacker):
         return sys.maxsize, None
 
 
+class YZPackUnpacker(DefaultUnpacker):
+    def __init__(self, sample):
+        super().__init__(sample)
+        self.allowed_sections = ['.yzpack']
+
+    def get_entrypoint(self):
+        return None
+
+    def get_tail_jump(self):
+        return sys.maxsize, None
+
 def identifypacker(sample, yar):
     rules = yara.compile(filepath=yar)
     matches = rules.match(sample)
@@ -192,6 +203,8 @@ def generate_label(l):
         return "pecompact"
     elif "upack" in str(l):
         return "upack"
+    elif "yzpack" in str(l):
+        return "yzpack"
     else:
         return 'unknown'
 
@@ -204,6 +217,7 @@ def get_unpacker(sample):
         "petite": PEtiteUnpacker,
         "aspack": ASPackUnpacker,
         "fsg": FSGUnpacker,
+        "yzpack": YZPackUnpacker,
     }
 
     if "pe32" not in str(yara_matches):

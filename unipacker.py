@@ -14,6 +14,7 @@ from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
+from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string, fix_ep, dump_image
 
@@ -789,8 +790,101 @@ def emu():
         shell_event.set()
 
 
+def setup_processinfo(mu):
+    global TEB_BASE, PEB_BASE
+    TEB_BASE = 0x200000
+    PEB_BASE = TEB_BASE + 0x1000
+    LDR_PTR = PEB_BASE + 0x1000
+    LIST_ENTRY_BASE = LDR_PTR + 0x1000
+
+    teb = TEB(
+        -1,  # fs:00h
+        STACK_START,  # fs:04h
+        STACK_START - STACK_SIZE,  # fs:08h
+        0,  # fs:0ch
+        0,  # fs:10h
+        0,  # fs:14h
+        TEB_BASE,  # fs:18h (teb base)
+        0,  # fs:1ch
+        0xdeadbeef,  # fs:20h (process id)
+        0xdeadbeef,  # fs:24h (current thread id)
+        0,  # fs:28h
+        0,  # fs:2ch
+        PEB_BASE,  # fs:3ch (peb base)
+    )
+
+    peb = PEB(
+        0x0,
+        0x0,
+        0x0,
+        0xffffffff,
+        BASE_ADDR,
+        LDR_PTR,
+    )
+
+    ntdll_entry = LIST_ENTRY(
+        LIST_ENTRY_BASE + 12,
+        LIST_ENTRY_BASE + 24,
+        0x77400000,
+    )
+
+    kernelbase_entry = LIST_ENTRY(
+        LIST_ENTRY_BASE + 24,
+        LIST_ENTRY_BASE + 0,
+        0x73D00000,
+
+    )
+
+    kernel32_entry = LIST_ENTRY(
+        LIST_ENTRY_BASE + 0,
+        LIST_ENTRY_BASE + 12,
+        0x755D0000,
+    )
+
+    ldr = PEB_LDR_DATA(
+        0x30,
+        0x1,
+        0x0,
+        LIST_ENTRY_BASE,
+        LIST_ENTRY_BASE + 24,
+        LIST_ENTRY_BASE,
+        LIST_ENTRY_BASE + 24,
+        LIST_ENTRY_BASE,
+        LIST_ENTRY_BASE + 24,
+    )
+
+
+
+    teb_payload = bytes(teb)
+    peb_payload = bytes(peb)
+
+    ldr_payload = bytes(ldr)
+
+    ntdll_payload = bytes(ntdll_entry)
+    kernelbase_payload = bytes(kernelbase_entry)
+    kernel32_payload = bytes(kernel32_entry)
+
+
+    mu.mem_map(TEB_BASE, align(0x5000))
+    mu.mem_write(TEB_BASE, teb_payload)
+    mu.mem_write(PEB_BASE, peb_payload)
+    mu.mem_write(LDR_PTR, ldr_payload)
+    mu.mem_write(LIST_ENTRY_BASE, ntdll_payload)
+    mu.mem_write(LIST_ENTRY_BASE+12, kernelbase_payload)
+    mu.mem_write(LIST_ENTRY_BASE+24, kernel32_payload)
+    mu.windows_tib = TEB_BASE
+    print(f"{mu.reg_read(UC_X86_REG_FS)}")
+
+
+def load_dll(mu, path_kernelbase, start_addr):
+    kernelbase = pefile.PE(path_kernelbase)
+    loaded_dll = kernelbase.get_memory_mapped_image(ImageBase=start_addr)
+    mu.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
+    mu.mem_write(start_addr, loaded_dll)
+
+
 def init_uc():
-    global virtualmemorysize, BASE_ADDR, STACK_ADDR, STACK_SIZE, HOOK_ADDR, mu, startaddr, loaded, apicall_handler
+    global virtualmemorysize, BASE_ADDR, STACK_ADDR, STACK_SIZE, STACK_START, HOOK_ADDR, mu, startaddr, loaded, apicall_handler
     # Calculate required memory
     virtualmemorysize = getVirtualMemorySize(sample)
     pe = pefile.PE(sample)
@@ -812,6 +906,13 @@ def init_uc():
     mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000, page_size=4096))
     mu.mem_write(BASE_ADDR, loaded)
 
+    setup_processinfo(mu)
+
+    # Load DLLs
+    #load_dll(mu, "DLLs/KernelBase.dll", 0x73D00000)
+    #load_dll(mu, "DLLs/kernel32.dll", 0x755D0000)
+    #load_dll(mu, "DLLs/ntdll.dll", 0x77400000)
+
     # initialize machine registers
     mu.mem_map(STACK_ADDR, STACK_SIZE)
     mu.reg_write(UC_X86_REG_ESP, STACK_ADDR + int(STACK_SIZE / 2))
@@ -821,6 +922,7 @@ def init_uc():
     mu.reg_write(UC_X86_REG_EDX, startaddr)
     mu.reg_write(UC_X86_REG_ESI, startaddr)
     mu.reg_write(UC_X86_REG_EDI, startaddr)
+    # Set FS Reg + 0x30 -> PEB mu.reg_read(UC_X86_REG_FS, 0x00)
 
     # init syscall handling and prepare hook memory for return values
     apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample)
