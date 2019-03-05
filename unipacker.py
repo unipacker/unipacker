@@ -188,12 +188,15 @@ Show current breakpoints:   b"""
 Usage:          dump [dest_path]
 
 If no destination path is being specified, the dump will be carried out to
-'unpacked.dump' in the current working directory. Dumped memory region:
+'unpacked.exe' in the current working directory. Dumped memory region:
 From the image base address (usually 0x400000 or 0x10000000) to the end
 of the loaded image: base address + virtual memory size + 0x3000 (buffer).
+This memory region is being loaded into the first section of the PE file.
+Like this, tools like Cutter are able to correctly parse the dump and display the
+data at the right offsets.
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
-            args = args or "unpacked.dump"
+            args = args or "unpacked.exe"
             dump_image(mu, BASE_ADDR, virtualmemorysize, args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")

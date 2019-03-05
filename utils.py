@@ -1,5 +1,7 @@
 import struct
 
+from pefile import PE
+
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -69,8 +71,20 @@ def fix_ep(uc, new_ep, base_addr):
     uc.mem_write(base_addr + pe_header_ptr + len(total_pad) + 2, struct.pack("I", new_ep))
 
 
-def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.dump"):
+def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.exe"):
     print(f"Dumping state to {path}")
-    with open(path, 'wb') as f:
-        tmp = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
-        f.write(tmp)
+    loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
+
+    pe = PE(data=loaded_img)
+    header_size = align(len(pe.header))
+
+    pe.sections[0].PointerToRawData = header_size
+    # make the section 2GiB ... pefile truncates to actual max size of data
+    pe.sections[0].SizeOfRawData = 0x80000000
+    pe.sections[0].Misc_VirtualSize = len(pe.sections[0].get_data())
+
+    for section in pe.sections[1:]:
+        section.SizeOfRawData = 0
+        section.Misc_VirtualSize = 0
+
+    pe.write(path)
