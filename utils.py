@@ -71,19 +71,28 @@ def fix_ep(uc, new_ep, base_addr):
     uc.mem_write(base_addr + pe_header_ptr + len(total_pad) + 2, struct.pack("I", new_ep))
 
 
-def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.exe"):
-    print(f"Dumping state to {path}")
-    loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
+def fix_section(section, next_section_vaddr):
+    sec_name = section.Name.decode().strip("\x00")
+    print(f"Size of raw data ({sec_name}): 0x{section.SizeOfRawData:02x}, "
+          f"fixed: 0x{next_section_vaddr - section.VirtualAddress:02x}")
+    section.SizeOfRawData = next_section_vaddr - section.VirtualAddress
+    section.PointerToRawData = section.VirtualAddress
 
+
+def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.exe"):
+    loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
     pe = PE(data=loaded_img)
 
+    print("Fixing sections")
     for i in range(len(pe.sections) - 1):
         curr_section = pe.sections[i]
         next_section = pe.sections[i + 1]
-        curr_section.SizeOfRawData = next_section.VirtualAddress - curr_section.VirtualAddress
-        curr_section.PointerToRawData = curr_section.VirtualAddress
-    last_section = pe.sections[-1]
-    last_section.SizeOfRawData = base_addr + virtualmemorysize - last_section.VirtualAddress
-    last_section.PointerToRawData = last_section.VirtualAddress
+        fix_section(curr_section, next_section.VirtualAddress)
 
+    # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
+    fix_section(pe.sections[-1], virtualmemorysize)
+
+    pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
+
+    print(f"Dumping state to {path}")
     pe.write(path)
