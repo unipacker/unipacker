@@ -14,6 +14,7 @@ from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
+from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string, fix_ep, dump_image
 
@@ -674,8 +675,8 @@ def hook_code(uc, address, size, user_data):
             unpacker.finish(uc, address)
             pause_emu()
 
-    if section_hopping_control and address not in apicall_handler.hooks and (
-            address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
+    if section_hopping_control and address not in apicall_handler.hooks and address-0x7 not in apicall_handler.hooks and (
+            address < HOOK_ADDR or address > HOOK_ADDR + 0x1000): # address-0x7 corresponding RET
         allowed = False
         for start, end in allowed_addr_ranges:
             if start <= address <= end:
@@ -792,8 +793,110 @@ def emu():
         shell_event.set()
 
 
+def setup_processinfo(mu):
+    global TEB_BASE, PEB_BASE
+    TEB_BASE = 0x200000
+    PEB_BASE = TEB_BASE + 0x1000
+    LDR_PTR = PEB_BASE + 0x1000
+    LIST_ENTRY_BASE = LDR_PTR + 0x1000
+
+    teb = TEB(
+        -1,  # fs:00h
+        STACK_START,  # fs:04h
+        STACK_START - STACK_SIZE,  # fs:08h
+        0,  # fs:0ch
+        0,  # fs:10h
+        0,  # fs:14h
+        TEB_BASE,  # fs:18h (teb base)
+        0,  # fs:1ch
+        0xdeadbeef,  # fs:20h (process id)
+        0xdeadbeef,  # fs:24h (current thread id)
+        0,  # fs:28h
+        0,  # fs:2ch
+        PEB_BASE,  # fs:3ch (peb base)
+    )
+
+    peb = PEB(
+        0,
+        0,
+        0,
+        0,
+        0xffffffff,
+        BASE_ADDR,
+        LDR_PTR,
+    )
+
+    ntdll_entry = LIST_ENTRY(
+        LIST_ENTRY_BASE + 12,
+        LIST_ENTRY_BASE + 24,
+        0x77400000,
+    )
+
+    kernelbase_entry = LIST_ENTRY(
+        LIST_ENTRY_BASE + 24,
+        LIST_ENTRY_BASE + 0,
+        0x73D00000,
+
+    )
+
+    kernel32_entry = LIST_ENTRY(
+        LIST_ENTRY_BASE + 0,
+        LIST_ENTRY_BASE + 12,
+        0x755D0000,
+    )
+
+    ldr = PEB_LDR_DATA(
+        0x30,
+        0x1,
+        0x0,
+        LIST_ENTRY_BASE,
+        LIST_ENTRY_BASE + 24,
+        LIST_ENTRY_BASE,
+        LIST_ENTRY_BASE + 24,
+        LIST_ENTRY_BASE,
+        LIST_ENTRY_BASE + 24,
+    )
+
+
+
+    teb_payload = bytes(teb)
+    peb_payload = bytes(peb)
+
+    ldr_payload = bytes(ldr)
+
+    ntdll_payload = bytes(ntdll_entry)
+    kernelbase_payload = bytes(kernelbase_entry)
+    kernel32_payload = bytes(kernel32_entry)
+
+
+    mu.mem_map(TEB_BASE, align(0x5000))
+    mu.mem_write(TEB_BASE, teb_payload)
+    mu.mem_write(PEB_BASE, peb_payload)
+    mu.mem_write(LDR_PTR, ldr_payload)
+    mu.mem_write(LIST_ENTRY_BASE, ntdll_payload)
+    mu.mem_write(LIST_ENTRY_BASE+12, kernelbase_payload)
+    mu.mem_write(LIST_ENTRY_BASE+24, kernel32_payload)
+    mu.windows_tib = TEB_BASE
+
+
+def load_dll(mu, path_dll, start_addr):
+    filename = os.path.splitext(os.path.basename(path_dll))[0]
+    if not os.path.exists(f"DLLs/{filename}.ldll"):
+        dll = pefile.PE(path_dll)
+        loaded_dll = dll.get_memory_mapped_image(ImageBase=start_addr)
+        with open(f"DLLs/{filename}.ldll", 'wb') as f:
+            f.write(loaded_dll)
+        mu.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
+        mu.mem_write(start_addr, loaded_dll)
+    else:
+        with open(f"DLLs/{filename}.ldll", 'rb') as dll:
+            loaded_dll = dll.read()
+            mu.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
+            mu.mem_write(start_addr, loaded_dll)
+
+
 def init_uc():
-    global virtualmemorysize, BASE_ADDR, STACK_ADDR, STACK_SIZE, HOOK_ADDR, mu, startaddr, loaded, apicall_handler
+    global virtualmemorysize, BASE_ADDR, STACK_ADDR, STACK_SIZE, STACK_START, HOOK_ADDR, mu, startaddr, loaded, apicall_handler
     # Calculate required memory
     virtualmemorysize = getVirtualMemorySize(sample)
     pe = pefile.PE(sample)
@@ -814,6 +917,13 @@ def init_uc():
     unpacker.virtualmemorysize = virtualmemorysize
     mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000, page_size=4096))
     mu.mem_write(BASE_ADDR, loaded)
+
+    setup_processinfo(mu)
+
+    # Load DLLs
+    load_dll(mu, "DLLs/KernelBase.dll", 0x73D00000)
+    load_dll(mu, "DLLs/kernel32.dll", 0x755D0000)
+    load_dll(mu, "DLLs/ntdll.dll", 0x77400000)
 
     # initialize machine registers
     mu.mem_map(STACK_ADDR, STACK_SIZE)
@@ -841,6 +951,20 @@ def init_uc():
             imports.add(func_name)
             curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
             mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
+
+    # Patch DLLs with hook
+    apicall_handler.add_hook(mu, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
+    apicall_handler.add_hook(mu, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
+    apicall_handler.add_hook(mu, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)
+    apicall_handler.add_hook(mu, "LoadLibraryA", "KernelBase.dll", 0x73D00000 + 0xf20d0)
+    apicall_handler.add_hook(mu, "GetProcAddress", "KernelBase.dll", 0x73D00000 + 0x102870)
+
+    apicall_handler.add_hook(mu, "VirtualProtect", "kernel32.dll", 0x755D0000 + 0x16760)
+    apicall_handler.add_hook(mu, "VirtualAlloc", "kernel32.dll", 0x755D0000 + 0x166a0)
+    apicall_handler.add_hook(mu, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
+    apicall_handler.add_hook(mu, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
+    apicall_handler.add_hook(mu, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
+
 
     # Add hooks
     mu.hook_add(UC_HOOK_CODE, hook_code)
