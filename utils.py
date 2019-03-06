@@ -76,15 +76,14 @@ def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.exe"):
     loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
 
     pe = PE(data=loaded_img)
-    header_size = align(len(pe.header))
 
-    pe.sections[0].PointerToRawData = header_size
-    # make the section 2GiB ... pefile truncates to actual max size of data
-    pe.sections[0].SizeOfRawData = 0x80000000
-    pe.sections[0].Misc_VirtualSize = len(pe.sections[0].get_data())
-
-    for section in pe.sections[1:]:
-        section.SizeOfRawData = 0
-        section.Misc_VirtualSize = 0
+    for i in range(len(pe.sections) - 1):
+        curr_section = pe.sections[i]
+        next_section = pe.sections[i + 1]
+        curr_section.SizeOfRawData = next_section.VirtualAddress - curr_section.VirtualAddress
+        curr_section.PointerToRawData = curr_section.VirtualAddress
+    last_section = pe.sections[-1]
+    last_section.SizeOfRawData = base_addr + virtualmemorysize - last_section.VirtualAddress
+    last_section.PointerToRawData = last_section.VirtualAddress
 
     pe.write(path)
