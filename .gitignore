@@ -109,3 +109,5 @@ pe32
 __pycache__
 
 # End of https://www.gitignore.io/api/tex
+/.unpacker_history
+/unpacked.exe
