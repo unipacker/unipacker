@@ -144,7 +144,7 @@ class WinApiCalls(object):
                 if free_type & 0x8000 and size == 0:  # MEM_RELEASE, clear whole allocated range
                     if address in self.alloc_sizes:
                         end_addr = self.alloc_sizes[address]
-                        uc.mem_unmap(address, end_addr)
+                        uc.mem_unmap(address, align(size))
                         new_chunks += remove_range((start, end), (address, end_addr))
                         success = True
                     else:
@@ -152,7 +152,8 @@ class WinApiCalls(object):
                         new_chunks += [(start, end)]
                 elif free_type & 0x4000 and size > 0:  # MEM_DECOMMIT, free requested size
                     end_addr = address + align(size)
-                    uc.mem_unmap(address, end_addr)
+                    print(f"VF: address: {address}, size: {hex(align(size))}")
+                    uc.mem_unmap(address, align(size))
                     new_chunks += remove_range((start, end), (address, end_addr))
                     success = True
                 else:
@@ -268,14 +269,15 @@ class WinApiCalls(object):
         log and print(f"InitializeCriticalSection: 0x{eip:02x}, pointer 0x{section_ptr:02x}")
         return None, esp + 4
 
-    def add_hook(self, uc, name, module_name):
-        curr_hook_addr = self.hook_addr + self.next_hook_offset
+    def add_hook(self, uc, name, module_name, curr_hook_addr=None):
         hexstr = bytes.fromhex('8b0425') + struct.pack('<I', self.hook_addr) + bytes.fromhex(
             'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
+        if curr_hook_addr is None:
+            curr_hook_addr = self.hook_addr + self.next_hook_offset
+            self.next_hook_offset += len(hexstr)
         uc.mem_write(curr_hook_addr, hexstr)
         self.hooks[curr_hook_addr] = name
         self.module_for_function[name] = module_name
-        self.next_hook_offset += len(hexstr)
         return curr_hook_addr
 
     def register_pending_breakpoint(self, target):

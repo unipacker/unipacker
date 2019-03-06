@@ -22,12 +22,12 @@ class TEB(Structure):
 
 class PEB(Structure):
     _fields_ = [
-        ("InheritedAddressSpace", c_byte),
-        ("ReadImageFileExecOptions", c_byte),
-        ("BeingDebugged", c_byte),
-        ("BitField", c_byte),
-        ("Mutant", c_void_p),
-        ("ImageBaseAddress", c_void_p),
+        ("InheritedAddressSpace", c_ubyte),
+        ("ReadImageFileExecOptions", c_ubyte),
+        ("BeingDebugged", c_ubyte),
+        ("BitField", c_ubyte),
+        ("Mutant", c_uint32),
+        ("ImageBaseAddress", c_uint32),
         ("Ldr", c_uint32),
         # ... too much item
     ]
@@ -37,7 +37,7 @@ class PEB_LDR_DATA(Structure):
     _fields_ = [
         ("Length", c_uint32),
         ("Initialized", c_uint32),
-        ("SsHandle", c_void_p),
+        ("SsHandle", c_uint32),
         ("InLoadOrderModuleList_First", c_uint32),
         ("InLoadOrderModuleList_Last", c_uint32),
         ("InMemoryOrderModuleList_First", c_uint32),

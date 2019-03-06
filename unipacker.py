@@ -672,8 +672,8 @@ def hook_code(uc, address, size, user_data):
             unpacker.finish(uc, address)
             pause_emu()
 
-    if section_hopping_control and address not in apicall_handler.hooks and (
-            address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
+    if section_hopping_control and address not in apicall_handler.hooks and address-0x7 not in apicall_handler.hooks and (
+            address < HOOK_ADDR or address > HOOK_ADDR + 0x1000): # address-0x7 corresponding RET
         allowed = False
         for start, end in allowed_addr_ranges:
             if start <= address <= end:
@@ -814,9 +814,10 @@ def setup_processinfo(mu):
     )
 
     peb = PEB(
-        0x0,
-        0x0,
-        0x0,
+        0,
+        0,
+        0,
+        0,
         0xffffffff,
         BASE_ADDR,
         LDR_PTR,
@@ -873,14 +874,22 @@ def setup_processinfo(mu):
     mu.mem_write(LIST_ENTRY_BASE+12, kernelbase_payload)
     mu.mem_write(LIST_ENTRY_BASE+24, kernel32_payload)
     mu.windows_tib = TEB_BASE
-    print(f"{mu.reg_read(UC_X86_REG_FS)}")
 
 
-def load_dll(mu, path_kernelbase, start_addr):
-    kernelbase = pefile.PE(path_kernelbase)
-    loaded_dll = kernelbase.get_memory_mapped_image(ImageBase=start_addr)
-    mu.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
-    mu.mem_write(start_addr, loaded_dll)
+def load_dll(mu, path_dll, start_addr):
+    filename = os.path.splitext(os.path.basename(path_dll))[0]
+    if not os.path.exists(f"DLLs/{filename}.ldll"):
+        dll = pefile.PE(path_dll)
+        loaded_dll = dll.get_memory_mapped_image(ImageBase=start_addr)
+        with open(f"DLLs/{filename}.ldll", 'wb') as f:
+            f.write(loaded_dll)
+        mu.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
+        mu.mem_write(start_addr, loaded_dll)
+    else:
+        with open(f"DLLs/{filename}.ldll", 'rb') as dll:
+            loaded_dll = dll.read()
+            mu.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
+            mu.mem_write(start_addr, loaded_dll)
 
 
 def init_uc():
@@ -909,9 +918,9 @@ def init_uc():
     setup_processinfo(mu)
 
     # Load DLLs
-    #load_dll(mu, "DLLs/KernelBase.dll", 0x73D00000)
-    #load_dll(mu, "DLLs/kernel32.dll", 0x755D0000)
-    #load_dll(mu, "DLLs/ntdll.dll", 0x77400000)
+    load_dll(mu, "DLLs/KernelBase.dll", 0x73D00000)
+    load_dll(mu, "DLLs/kernel32.dll", 0x755D0000)
+    load_dll(mu, "DLLs/ntdll.dll", 0x77400000)
 
     # initialize machine registers
     mu.mem_map(STACK_ADDR, STACK_SIZE)
@@ -922,7 +931,6 @@ def init_uc():
     mu.reg_write(UC_X86_REG_EDX, startaddr)
     mu.reg_write(UC_X86_REG_ESI, startaddr)
     mu.reg_write(UC_X86_REG_EDI, startaddr)
-    # Set FS Reg + 0x30 -> PEB mu.reg_read(UC_X86_REG_FS, 0x00)
 
     # init syscall handling and prepare hook memory for return values
     apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample)
@@ -940,6 +948,20 @@ def init_uc():
             imports.add(func_name)
             curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
             mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
+
+    # Patch DLLs with hook
+    apicall_handler.add_hook(mu, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
+    apicall_handler.add_hook(mu, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
+    apicall_handler.add_hook(mu, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)
+    apicall_handler.add_hook(mu, "LoadLibraryA", "KernelBase.dll", 0x73D00000 + 0xf20d0)
+    apicall_handler.add_hook(mu, "GetProcAddress", "KernelBase.dll", 0x73D00000 + 0x102870)
+
+    apicall_handler.add_hook(mu, "VirtualProtect", "kernel32.dll", 0x755D0000 + 0x16760)
+    apicall_handler.add_hook(mu, "VirtualAlloc", "kernel32.dll", 0x755D0000 + 0x166a0)
+    apicall_handler.add_hook(mu, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
+    apicall_handler.add_hook(mu, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
+    apicall_handler.add_hook(mu, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
+
 
     # Add hooks
     mu.hook_add(UC_HOOK_CODE, hook_code)
