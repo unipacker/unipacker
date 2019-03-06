@@ -152,7 +152,6 @@ class WinApiCalls(object):
                         new_chunks += [(start, end)]
                 elif free_type & 0x4000 and size > 0:  # MEM_DECOMMIT, free requested size
                     end_addr = address + align(size)
-                    print(f"VF: address: {address}, size: {hex(align(size))}")
                     uc.mem_unmap(address, align(size))
                     new_chunks += remove_range((start, end), (address, end_addr))
                     success = True
