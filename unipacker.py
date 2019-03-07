@@ -198,7 +198,7 @@ data at the right offsets.
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
             args = args or "unpacked.exe"
-            dump_image(mu, BASE_ADDR, virtualmemorysize, args)
+            dump_image(mu, BASE_ADDR, virtualmemorysize, apicall_handler.ntp, args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
 
@@ -514,7 +514,7 @@ details on this representation)"""
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
         else:
             self.rules = yara.compile(filepath=args)
-        dump_image(mu, BASE_ADDR, virtualmemorysize, "unpacked.dump")
+        dump_image(mu, BASE_ADDR, virtualmemorysize, apicall_handler.ntp, "unpacked.dump")
         matches = self.rules.match("unpacked.dump")
         print(", ".join(map(str, matches)))
 
@@ -688,7 +688,7 @@ def hook_code(uc, address, size, user_data):
             curr_section_range = unpacker.get_section_range(sec_name)
             if curr_section_range:
                 allowed_addr_ranges += [unpacker.get_section_range(sec_name)]
-            unpacker.finish(uc, address)
+            unpacker.finish(uc, address, apicall_handler.ntp)
             pause_emu()
 
     curr_section = unpacker.get_section(address)
@@ -778,7 +778,7 @@ def emu():
         print_stats()
     except UcError as e:
         print(f"Error: {e}")
-        dump_image(mu, BASE_ADDR, virtualmemorysize)
+        dump_image(mu, BASE_ADDR, virtualmemorysize, apicall_handler.ntp)
         emulator_event.clear()
         shell.emu_started = False
         shell_event.set()
@@ -931,8 +931,15 @@ def init_uc():
     mu.reg_write(UC_X86_REG_ESI, startaddr)
     mu.reg_write(UC_X86_REG_EDI, startaddr)
 
+    # setup section dict used for custom memory protection
+    atn = {}  # Dict Address to Name: (StartVAddr, EndVAddr) -> Name
+    ntp = {}  # Dict Name to Protection Tupel: Name -> (Execute, Read, Write)
+    for s in pe.sections:
+        atn[(s.VirtualAddress + BASE_ADDR, s.VirtualAddress + BASE_ADDR + s.Misc_VirtualSize)] = s.Name
+        ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
+
     # init syscall handling and prepare hook memory for return values
-    apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample)
+    apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample, atn, ntp)
     mu.mem_map(HOOK_ADDR, 0x1000)
     unpacker.secs += [{"name": "hooks", "vaddr": HOOK_ADDR, "vsize": 0x1000}]
     hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', HOOK_ADDR) + bytes.fromhex(

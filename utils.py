@@ -79,7 +79,24 @@ def fix_section(section, next_section_vaddr):
     section.PointerToRawData = section.VirtualAddress
 
 
-def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.exe"):
+def set_protections(section, protection):
+    x, r, w = protection
+    section.IMAGE_SCN_MEM_EXECUTE = x
+    section.IMAGE_SCN_MEM_READ = r
+    section.IMAGE_SCN_MEM_WRITE = w
+
+
+def fix_section_mem_protection(pe, ntp):
+    for s in pe.sections:
+        if s.Name in ntp:
+            set_protections(s, ntp[s.Name])
+
+
+def fix_imports(pe):  # TODO this is only for the YZPack sample for testing purposes
+    pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = 0x60000
+
+
+def dump_image(uc, base_addr, virtualmemorysize, ntp, path="unpacked.exe"):
     loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
     pe = PE(data=loaded_img)
 
@@ -91,6 +108,12 @@ def dump_image(uc, base_addr, virtualmemorysize, path="unpacked.exe"):
 
     # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
     fix_section(pe.sections[-1], virtualmemorysize)
+
+    print("Fixing Memory Protection of Sections")
+    fix_section_mem_protection(pe, ntp)
+
+    print("Fixing Imports...")
+    fix_imports(pe)
 
     pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
 

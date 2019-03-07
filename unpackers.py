@@ -46,10 +46,10 @@ class DefaultUnpacker(object):
                 print("Incorrect start address!")
         return startaddr
 
-    def finish(self, uc, address):
+    def finish(self, uc, address, ntp):
         address = address or self.BASE_ADDR
         fix_ep(uc, address - self.BASE_ADDR, self.BASE_ADDR)
-        dump_image(uc, self.BASE_ADDR, self.virtualmemorysize)
+        dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, ntp)
 
     def get_allowed_addr_ranges(self):
         allowed_ranges = []
