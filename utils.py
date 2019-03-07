@@ -1,7 +1,5 @@
 import struct
 
-from pefile import PE
-
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -59,63 +57,3 @@ def get_string(ptr, uc):
         buf += chr(item[0])
         i += 1
     return buf
-
-
-def fix_ep(uc, new_ep, base_addr):
-    pe_header_ptr, = struct.unpack("<I", uc.mem_read(base_addr + 0x3c, 4))
-    file_header_pad = "x" * 20
-    optional_pad = "x" * 16
-    total_pad = "xx" + file_header_pad + optional_pad
-    ep, = struct.unpack(f"{total_pad}I", uc.mem_read(base_addr + pe_header_ptr, 44))
-    print(f"Original EP 0x{base_addr + ep:02x} is overwritten with 0x{base_addr + new_ep:02x}")
-    uc.mem_write(base_addr + pe_header_ptr + len(total_pad) + 2, struct.pack("I", new_ep))
-
-
-def fix_section(section, next_section_vaddr):
-    sec_name = section.Name.decode().strip("\x00")
-    print(f"Size of raw data ({sec_name}): 0x{section.SizeOfRawData:02x}, "
-          f"fixed: 0x{next_section_vaddr - section.VirtualAddress:02x}")
-    section.SizeOfRawData = next_section_vaddr - section.VirtualAddress
-    section.PointerToRawData = section.VirtualAddress
-
-
-def set_protections(section, protection):
-    x, r, w = protection
-    section.IMAGE_SCN_MEM_EXECUTE = x
-    section.IMAGE_SCN_MEM_READ = r
-    section.IMAGE_SCN_MEM_WRITE = w
-
-
-def fix_section_mem_protection(pe, ntp):
-    for s in pe.sections:
-        if s.Name in ntp:
-            set_protections(s, ntp[s.Name])
-
-
-def fix_imports(pe):  # TODO this is only for the YZPack sample for testing purposes
-    pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = 0x60000
-
-
-def dump_image(uc, base_addr, virtualmemorysize, ntp, path="unpacked.exe"):
-    loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
-    pe = PE(data=loaded_img)
-
-    print("Fixing sections")
-    for i in range(len(pe.sections) - 1):
-        curr_section = pe.sections[i]
-        next_section = pe.sections[i + 1]
-        fix_section(curr_section, next_section.VirtualAddress)
-
-    # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
-    fix_section(pe.sections[-1], virtualmemorysize)
-
-    print("Fixing Memory Protection of Sections")
-    fix_section_mem_protection(pe, ntp)
-
-    print("Fixing Imports...")
-    fix_imports(pe)
-
-    pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
-
-    print(f"Dumping state to {path}")
-    pe.write(path)

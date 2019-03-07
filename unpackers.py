@@ -3,7 +3,7 @@ import sys
 import r2pipe
 import yara
 
-from utils import fix_ep, dump_image
+from imagedump import ImageDump, YZPackDump
 
 
 class DefaultUnpacker(object):
@@ -16,6 +16,7 @@ class DefaultUnpacker(object):
         r2.quit()
         self.allowed_sections = [s["name"] for s in self.secs if
                                  "vaddr" in s and "name" in s and s["vaddr"] <= ep < s["vaddr"] + s["vsize"]]
+        self.dumper = ImageDump()
         self.write_execute_control = False
         self.BASE_ADDR = None
         self.virtualmemorysize = None
@@ -46,10 +47,8 @@ class DefaultUnpacker(object):
                 print("Incorrect start address!")
         return startaddr
 
-    def finish(self, uc, address, ntp):
-        address = address or self.BASE_ADDR
-        fix_ep(uc, address - self.BASE_ADDR, self.BASE_ADDR)
-        dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, ntp)
+    def dump(self, uc, ntp, path="unpacked.exe"):
+        self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, ntp, path)
 
     def get_allowed_addr_ranges(self):
         allowed_ranges = []
@@ -123,9 +122,6 @@ class UPXUnpacker(DefaultUnpacker):
     def get_entrypoint(self):
         return None
 
-    def finish(self, uc, address):
-        super().finish(uc, self.oep)
-
 
 class PEtiteUnpacker(DefaultUnpacker):
 
@@ -170,12 +166,14 @@ class YZPackUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = ['.yzpack']
+        self.dumper = YZPackDump()
 
     def get_entrypoint(self):
         return None
 
     def get_tail_jump(self):
         return sys.maxsize, None
+
 
 def identifypacker(sample, yar):
     rules = yara.compile(filepath=yar)
