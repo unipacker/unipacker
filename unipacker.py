@@ -198,7 +198,7 @@ data at the right offsets.
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
             args = args or "unpacked.exe"
-            unpacker.dump(mu, apicall_handler.ntp, path=args)
+            unpacker.dump(mu, apicall_handler, path=args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
 
@@ -492,7 +492,7 @@ details on this representation)"""
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
         else:
             self.rules = yara.compile(filepath=args)
-        unpacker.dump(mu, apicall_handler.ntp)
+        unpacker.dump(mu, apicall_handler)
         matches = self.rules.match("unpacked.exe")
         print(", ".join(map(str, matches)))
 
@@ -643,14 +643,14 @@ def hook_code(uc, address, size, user_data):
         pause_emu()
     if address == endaddr:
         print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
-        unpacker.dump(uc, apicall_handler.ntp)
+        unpacker.dump(uc, apicall_handler)
         pause_emu()
 
     if write_execute_control and address not in apicall_handler.hooks and (
             address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
         if any(lower <= address <= upper for (lower, upper) in sorted(write_targets)):
             print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
-            unpacker.dump(uc, apicall_handler.ntp)
+            unpacker.dump(uc, apicall_handler)
             pause_emu()
 
     if section_hopping_control and address not in apicall_handler.hooks and address - 0x7 not in apicall_handler.hooks and (
@@ -666,7 +666,7 @@ def hook_code(uc, address, size, user_data):
             curr_section_range = unpacker.get_section_range(sec_name)
             if curr_section_range:
                 allowed_addr_ranges += [unpacker.get_section_range(sec_name)]
-            unpacker.dump(uc, apicall_handler.ntp)
+            unpacker.dump(uc, apicall_handler)
             pause_emu()
 
     curr_section = unpacker.get_section(address)
@@ -756,12 +756,12 @@ def emu():
         print_stats()
     except UcError as e:
         print(f"Error: {e}")
-        unpacker.dump(mu, apicall_handler.ntp)
+        unpacker.dump(mu, apicall_handler)
         emulator_event.clear()
         shell.emu_started = False
         shell_event.set()
     finally:
-        unpacker.dump(mu, apicall_handler.ntp)
+        unpacker.dump(mu, apicall_handler)
         emulator_event.clear()
         shell.emu_started = False
         shell_event.set()

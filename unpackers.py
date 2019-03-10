@@ -47,8 +47,8 @@ class DefaultUnpacker(object):
                 print("Incorrect start address!")
         return startaddr
 
-    def dump(self, uc, ntp, path="unpacked.exe"):
-        self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, ntp, path)
+    def dump(self, uc, apicall_handler, path="unpacked.exe"):
+        self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, apicall_handler, path)
 
     def get_allowed_addr_ranges(self):
         allowed_ranges = []

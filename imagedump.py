@@ -26,7 +26,8 @@ class ImageDump(object):
     def fix_imports(self, pe):
         pass
 
-    def dump_image(self, uc, base_addr, virtualmemorysize, ntp, path="unpacked.exe"):
+    def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
+        ntp = apicall_handler.ntp
         loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
         pe = pefile.PE(data=loaded_img)
 
