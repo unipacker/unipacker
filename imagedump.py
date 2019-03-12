@@ -64,21 +64,22 @@ class ImageDump(object):
 
         dllname_to_ptrs = []
 
-        for k, v in dllname_to_functionlist:
-            dllname_to_ptrs.append((k, super().locate_ptr_to_occurences(b, super().find_occurences(b, k))))
+        for k in dllname_to_functionlist.keys():
+            dllname_to_ptrs.append((k, self.locate_ptr_to_occurences(b, self.find_occurences(b, k))))
 
         if len(dllname_to_ptrs) == 1 and len(dllname_to_ptrs[0][1]) == 1:
             addr = dllname_to_ptrs[0][1]
         elif len(dllname_to_ptrs) == 1:
             # TODO Try Fix Imports by Imported Function Names
-            return False
+            print("FAILED here")
+            return None  # FAILED
         else:
             addrlist = dllname_to_ptrs[0][1]
             addrlist2 = dllname_to_ptrs[1][1]
-
             a1, a2 = self.search_offset_two(addrlist, addrlist2, 0x14)
             if a1 is None and a2 is None:
-                return False
+                print(f"FAILED a1: {a1}, a2: {a2}")
+                return None  # FAILED
 
             dllname_to_ptrs[0] = (dllname_to_ptrs[0][0], [a1])
             dllname_to_ptrs[1] = (dllname_to_ptrs[1][0], [a2])
@@ -95,13 +96,14 @@ class ImageDump(object):
                     dllname_to_ptrs[i+1] = (dllname_to_ptrs[i+1][0], [val])
 
             # select pointer
+            addr = dllname_to_ptrs[0][1][0]
             for i in range(len(dllname_to_ptrs)):
                 if addr > dllname_to_ptrs[i][1][0]:
                     addr = dllname_to_ptrs[i][1][0]
 
-            pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = addr - 0xC
-
+        pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = addr - 0xC
         os.remove(".unipacker_brokenimport.exe")
+        return pe
 
     def fix_imports(self, uc, pe, dllname_to_functionlist):
         pe.write(".unipacker_brokenimport.exe")
@@ -114,12 +116,16 @@ class ImageDump(object):
 
 
         os.remove(".unipacker_brokenimport.exe")
-        pass
+        return pe
 
     def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
         ntp = apicall_handler.ntp
         dllname_to_functionlist = apicall_handler.dllname_to_functionlist
-        loaded_img = uc.mem_read(base_addr, virtualmemorysize + 0x3000)
+        if len(apicall_handler.allocated_chunks) == 0:
+            total_size = virtualmemorysize
+        else:
+            total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
+        loaded_img = uc.mem_read(base_addr, total_size)
         pe = pefile.PE(data=loaded_img)
 
         pe.OPTIONAL_HEADER.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP)
@@ -137,7 +143,7 @@ class ImageDump(object):
         self.fix_section_mem_protection(pe, ntp)
 
         print("Fixing Imports...")
-        self.fix_imports(uc, pe, dllname_to_functionlist)
+        pe = self.fix_imports(uc, pe, dllname_to_functionlist)
 
         pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
 
@@ -147,5 +153,5 @@ class ImageDump(object):
 
 class YZPackDump(ImageDump):
     def fix_imports(self, uc, pe, dllname_to_functionlist):
-        super().fix_imports_by_dllname(pe, dllname_to_functionlist)
+        return super().fix_imports_by_dllname(pe, dllname_to_functionlist)
 

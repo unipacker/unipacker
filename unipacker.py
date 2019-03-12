@@ -885,9 +885,9 @@ def init_uc():
     if startaddr is None:
         startaddr = entrypoint(pe)
     loaded = pe.get_memory_mapped_image(ImageBase=BASE_ADDR)
-    virtualmemorysize = len(loaded)
+    virtualmemorysize = align(len(loaded) + 0x10000, page_size=4096)  # Space for possible IAT rebuilding
     unpacker.virtualmemorysize = virtualmemorysize
-    mu.mem_map(BASE_ADDR, align(virtualmemorysize + 0x3000, page_size=4096))
+    mu.mem_map(BASE_ADDR, virtualmemorysize)
     mu.mem_write(BASE_ADDR, loaded)
 
     setup_processinfo(mu)

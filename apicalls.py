@@ -48,7 +48,7 @@ class WinApiCalls(object):
         self.module_handle_offset = 0
         self.module_handles = {}
         self.module_for_function = {}
-        self.dynamic_mem_offset = self.base_addr + self.virtualmemorysize + 0x4000
+        self.dynamic_mem_offset = self.base_addr + self.virtualmemorysize + 0x1
         self.allocated_chunks = []
         self.alloc_sizes = {}
         self.pending_breakpoints = set()
