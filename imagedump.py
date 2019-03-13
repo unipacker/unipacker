@@ -132,7 +132,7 @@ class ImageDump(object):
         loaded_img = uc.mem_read(base_addr, total_size)
         pe = pefile.PE(data=loaded_img)
 
-        pe.OPTIONAL_HEADER.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP)
+        pe.OPTIONAL_HEADER.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
 
         print("Fixing sections")
         for i in range(len(pe.sections) - 1):
