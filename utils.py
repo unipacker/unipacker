@@ -1,5 +1,5 @@
 import struct
-
+import pefile
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -57,3 +57,13 @@ def get_string(ptr, uc):
         buf += chr(item[0])
         i += 1
     return buf
+
+
+def calc_export_offset_of_dll(dllpath, function_name):
+    """This function calculates the offset of exported function of a DLL. It is slow, so hardcoded values are used"""
+    dll = pefile.PE(dllpath)
+    exports = dll.DIRECTORY_ENTRY_EXPORT.symbols
+    for e in exports:
+        if e.name == bytes(function_name, 'ascii'):
+            return e.address
+    return None

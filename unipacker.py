@@ -932,6 +932,7 @@ def init_uc():
             mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
 
     # Patch DLLs with hook
+    # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll
     apicall_handler.add_hook(mu, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
     apicall_handler.add_hook(mu, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
     apicall_handler.add_hook(mu, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)

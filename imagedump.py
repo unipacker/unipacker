@@ -154,6 +154,7 @@ class ImageDump(object):
             if directory.name == "IMAGE_DIRECTORY_ENTRY_IAT":
                 directory.Size = 0
                 directory.VirtualAddress = 0
+                break
 
         pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
 
