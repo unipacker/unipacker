@@ -102,7 +102,12 @@ class ImageDump(object):
                     addr = dllname_to_ptrs[i][1][0]
 
         pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = addr - 0xC
+        pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].Size = len(dllname_to_functionlist) * 5 * 4
+        # Per Dll 1 IMAGE_IMPORT_DESCRIPTOR (THUNK_DATA), Per IMAGE_IMPORT_DESCRIPTOR 5 DWORDS, Size in bytes so time 4
         os.remove(".unipacker_brokenimport.exe")
+        return pe
+
+    def fix_imports_by_rebuilding(self, uc, pe, dllname_to_function_list):
         return pe
 
     def fix_imports(self, uc, pe, dllname_to_functionlist):
@@ -113,7 +118,6 @@ class ImageDump(object):
         print(dllname_to_functionlist)
 
         pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = 0x60000
-
 
         os.remove(".unipacker_brokenimport.exe")
         return pe
@@ -144,6 +148,12 @@ class ImageDump(object):
 
         print("Fixing Imports...")
         pe = self.fix_imports(uc, pe, dllname_to_functionlist)
+
+        # Set IAT-Directory to 0 (VA and Size)
+        for directory in pe.OPTIONAL_HEADER.DATA_DIRECTORY:
+            if directory.name == "IMAGE_DIRECTORY_ENTRY_IAT":
+                directory.Size = 0
+                directory.VirtualAddress = 0
 
         pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
 
