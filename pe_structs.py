@@ -18,14 +18,6 @@ class IMAGE_IMPORT_DESCRIPTOR(Structure):
     ]
 
 
-# Required for IMAGE_SECTION_HEADER
-class Misc(Structure):
-    _fields_ = [
-        ("PhysicalAddress", c_uint32),
-        ("VirtualSize", c_uint32),
-    ]
-
-
 # Array of IMAGE_SECTION_HEADERS is Section TABLE
 class IMAGE_SECTION_HEADER(Structure):
     _fields_ = [

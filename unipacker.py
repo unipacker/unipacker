@@ -885,7 +885,7 @@ def init_uc():
     if startaddr is None:
         startaddr = entrypoint(pe)
     loaded = pe.get_memory_mapped_image(ImageBase=BASE_ADDR)
-    virtualmemorysize = align(len(loaded) + 0x20000, page_size=4096)  # Space for new Section Table and possible IAT rebuilding
+    virtualmemorysize = align(len(loaded) + 0x10000, page_size=4096)  # Space possible IAT rebuilding
     unpacker.virtualmemorysize = virtualmemorysize
     mu.mem_map(BASE_ADDR, virtualmemorysize)
     mu.mem_write(BASE_ADDR, loaded)

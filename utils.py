@@ -29,6 +29,15 @@ def align(value, page_size=4096):
     return aligned_size
 
 
+def alignments(value, multiple_of):
+    if value <= multiple_of:
+        return multiple_of
+    c = 1
+    while value > multiple_of*c:
+        c += 1
+    return multiple_of*c
+
+
 def remove_range(old_range, to_remove):
     old_lower, old_upper = old_range
     remove_lower, remove_upper = to_remove

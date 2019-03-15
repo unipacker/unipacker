@@ -7,7 +7,7 @@ import struct
 
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER
-from utils import align
+from utils import align, alignments
 
 
 class ImageDump(object):
@@ -282,6 +282,44 @@ class ImageDump(object):
             number_of_added_sections += 1
         return chunk_sections
 
+    def add_import_section(self, uc, pe, base_addr, virtualmemorysize, totalsize):
+
+        rva_to_section_table = pe.DOS_HEADER.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + len(bytes(_IMAGE_OPTIONAL_HEADER()))
+        number_of_sections = pe.FILE_HEADER.NumberOfSections
+        rva_to_section_table += len(bytes(IMAGE_SECTION_HEADER())) * number_of_sections
+        import_section = IMAGE_SECTION_HEADER(
+            bytes(".impdata", 'ascii'),  # Name
+            0x10000,  # VirtualSize
+            virtualmemorysize - 0x10000,  # VirtualAddress
+            0x10000,  # SizeOfRawData
+            virtualmemorysize - 0x10000,  # PointerToRawData
+            0,  # PointerToRelocations
+            0,  # PointerToLinenumbers
+            0,  # NumberOfRelocations
+            0,  # NumberOfLinenumbers
+            0xe0000020,  # Characteristics
+        )
+
+        section_payload = bytes(import_section)
+
+        uc.mem_write(base_addr + rva_to_section_table, section_payload)
+
+
+
+        # TODO Correct Value of Number of Sections
+        rva_to_number_of_sections = pe.DOS_HEADER.e_lfanew + 4 + 2
+        uc.mem_write(base_addr + rva_to_number_of_sections, struct.pack("<H", number_of_sections + 1))
+
+        # Fix SizeOfImage
+        rva_to_size_of_image = pe.DOS_HEADER.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + 0x38
+        size_of_image = alignments(totalsize, pe.OPTIONAL_HEADER.SectionAlignment)
+        print(f"Size of image: {size_of_image}, totalsize: {totalsize}")
+        uc.mem_write(base_addr + rva_to_size_of_image, struct.pack("<I", size_of_image))
+        # Fix SizeOfHeaders
+        rva_to_size_of_headers = rva_to_size_of_image + 4
+        size_of_hdrs = alignments(pe.OPTIONAL_HEADER.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())), pe.OPTIONAL_HEADER.FileAlignment)
+        print(f"Size of headers: {size_of_hdrs}")
+        uc.mem_write(base_addr + rva_to_size_of_headers, struct.pack("<I", size_of_hdrs))
 
     def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
         ntp = apicall_handler.ntp
@@ -290,19 +328,27 @@ class ImageDump(object):
             total_size = virtualmemorysize
         else:
             total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
+
+        loaded_img = uc.mem_read(base_addr, total_size)
+        pe = pefile.PE(data=loaded_img)
+
+        old_number_of_sections = pe.FILE_HEADER.NumberOfSections
+
+        self.add_import_section(uc, pe, base_addr, virtualmemorysize, total_size)
+
         loaded_img = uc.mem_read(base_addr, total_size)
         pe = pefile.PE(data=loaded_img)
 
         pe.OPTIONAL_HEADER.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
 
         print("Fixing sections")
-        for i in range(len(pe.sections) - 1):
+        for i in range(old_number_of_sections - 1):
             curr_section = pe.sections[i]
             next_section = pe.sections[i + 1]
             self.fix_section(curr_section, next_section.VirtualAddress)
 
         # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
-        self.fix_section(pe.sections[-1], virtualmemorysize - 0x20000)
+        self.fix_section(pe.sections[old_number_of_sections - 1], virtualmemorysize - 0x10000)
 
         print("Fixing Memory Protection of Sections")
         self.fix_section_mem_protection(pe, ntp)
