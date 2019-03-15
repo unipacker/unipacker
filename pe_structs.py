@@ -2,6 +2,7 @@ from ctypes import *
 
 
 class _IMAGE_DATA_DIRECTORY(Structure):
+    _pack_ = 1
     _fields_ = [
         ("VirtualAddress", c_uint32),
         ("Size", c_uint32),
@@ -9,6 +10,7 @@ class _IMAGE_DATA_DIRECTORY(Structure):
 
 
 class IMAGE_IMPORT_DESCRIPTOR(Structure):
+    _pack_ = 1
     _fields_ = [
         ("Characteristics", c_uint32),
         ("TimeDateStamp", c_uint32),
@@ -20,6 +22,7 @@ class IMAGE_IMPORT_DESCRIPTOR(Structure):
 
 # Array of IMAGE_SECTION_HEADERS is Section TABLE
 class IMAGE_SECTION_HEADER(Structure):
+    _pack_ = 1
     _fields_ = [
         ("Name", c_char*8),
         ("VirtualSize", c_uint32),
@@ -35,6 +38,7 @@ class IMAGE_SECTION_HEADER(Structure):
 
 
 class _IMAGE_OPTIONAL_HEADER(Structure):
+    _pack_ = 1
     _fields_ = [
         ("Magic", c_uint16),
         ("MajorLinkerVersion", c_char),
@@ -72,6 +76,7 @@ class _IMAGE_OPTIONAL_HEADER(Structure):
 
 # PE HEADER = COFF HEADER
 class _IMAGE_FILE_HEADER(Structure):
+    _pack_ = 1
     _fields_ = [
         ("Signature", c_uint32),
         ("Machine", c_uint16),
@@ -86,6 +91,7 @@ class _IMAGE_FILE_HEADER(Structure):
 
 # DOS HEADER
 class _IMAGE_DOS_HEADER(Structure):
+    _pack_ = 1
     _fields_ = [
         ("e_magic", c_uint16),
         ("e_cblp", c_uint16),

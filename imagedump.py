@@ -5,6 +5,7 @@ import os
 from unicorn.x86_const import *
 import struct
 
+from headers import print_dos_header
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER
 from utils import align, alignments
@@ -114,6 +115,7 @@ class ImageDump(object):
     def fix_imports_by_rebuilding(self, uc, pe, dllname_to_function_list):
         return pe
 
+    # TODO Fix
     def fix_imports(self, uc, pe, dllname_to_functionlist):
         pe.write(".unipacker_brokenimport.exe")
         with open(".unipacker_brokenimport.exe", 'rb') as f:
@@ -328,6 +330,8 @@ class ImageDump(object):
             total_size = virtualmemorysize
         else:
             total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
+
+        print_dos_header(uc, base_addr)
 
         loaded_img = uc.mem_read(base_addr, total_size)
         pe = pefile.PE(data=loaded_img)
