@@ -76,3 +76,7 @@ def calc_export_offset_of_dll(dllpath, function_name):
         if e.name == bytes(function_name, 'ascii'):
             return e.address
     return None
+
+
+class InvalidPEFile(Exception):
+    pass
