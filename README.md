@@ -33,6 +33,7 @@ If you would like to start at the entry point declared in the PE header and just
 press ```Enter```
 
 ## Usage
+### Normal installation
 Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/VirusTotal/yara)
 ```
 pip3 install -r requirements.txt
@@ -40,3 +41,15 @@ python3 unipacker.py
 ```
 For detailed instructions on how to use Un{i}packer please refer to the [Wiki](https://github.com/unipacker/unipacker/wiki).
 Additionally, all of the shell commands are documented. To access this information, use the ```help``` command
+### Using Docker
+You can also use the provided Dockerfile to run a containerized version of Un{i}packer:
+```
+docker build -t unipacker . && \
+docker run \
+-v ~/local_samples:/root/unipacker/local_samples \
+--name unipacker \
+--rm \
+unipacker 
+```
+Assuming you have a folder called ```local_samples``` in your home directory, this will be mounted inside the container.
+Un{i}packer will thus be able to access those binaries via ```/root/unipacker/local_samples```
