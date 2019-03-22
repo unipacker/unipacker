@@ -6,7 +6,7 @@ from unicorn.x86_const import *
 import struct
 import sys
 
-from headers import print_dos_header, print_all_headers, hdr_read, PE
+from headers import print_dos_header, print_all_headers, hdr_read, PE, pe_write
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER
 from utils import align, alignments, InvalidPEFile
@@ -62,9 +62,9 @@ class ImageDump(object):
         return None, None
 
     # Fix imports by DLL Name
-    def fix_imports_by_dllname(self, pe, dllname_to_functionlist):  # TODO give options to user if other (valid) addresses are found
-        addr = pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress
-        pe.write(".unipacker_brokenimport.exe")
+    # TODO give options to user if other (valid) addresses are found
+    def fix_imports_by_dllname(self, uc, hdr, total_size, dllname_to_functionlist):
+        pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
         with open(".unipacker_brokenimport.exe", 'rb') as f:
             b = f.read()
 
@@ -107,27 +107,28 @@ class ImageDump(object):
                 if addr > dllname_to_ptrs[i][1][0]:
                     addr = dllname_to_ptrs[i][1][0]
 
-        pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = addr - 0xC
-        pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].Size = len(dllname_to_functionlist) * 5 * 4
+        hdr.data_directories[1].VirtualAddress = addr - 0xC
+        hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
         # Per Dll 1 IMAGE_IMPORT_DESCRIPTOR (THUNK_DATA), Per IMAGE_IMPORT_DESCRIPTOR 5 DWORDS, Size in bytes so time 4
         os.remove(".unipacker_brokenimport.exe")
-        return pe
+        return hdr
 
-    def fix_imports_by_rebuilding(self, uc, pe, dllname_to_function_list):
-        return pe
+    def fix_imports_by_rebuilding(self, uc, hdr, total_size, dllname_to_function_list):
+        return hdr
 
     # TODO Fix
-    def fix_imports(self, uc, pe, dllname_to_functionlist):
-        pe.write(".unipacker_brokenimport.exe")
+    def fix_imports(self, uc, hdr, total_size, dllname_to_functionlist):
+        pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
         with open(".unipacker_brokenimport.exe", 'rb') as f:
             b = f.read()
 
         print(dllname_to_functionlist)
 
-        pe.OPTIONAL_HEADER.DATA_DIRECTORY[1].VirtualAddress = 0x60000
+        hdr.data_directories[1].VirtualAddress = 0x60000
+        hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
 
         os.remove(".unipacker_brokenimport.exe")
-        return pe
+        return hdr
 
     def fix_header(self, uc, parse_pe, base_addr, virtualmemorysize, total_size, chunk_sections, number_of_added_sections):
 
@@ -323,16 +324,29 @@ class ImageDump(object):
         # Correct Value of Number of Sections
         hdr.pe_header.NumberOfSections += 1
 
-        # Fix SizeOfImage
-        hdr.opt_header.SizeOfImage = alignments(totalsize, hdr.opt_header.SectionAlignment)
-        print(f"Size of image: {hdr.opt_header.SizeOfImage}, totalsize: {totalsize}")
-
         # Fix SizeOfHeaders
         hdr.opt_header.SizeOfHeaders = alignments(hdr.opt_header.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())),
                                   hdr.opt_header.FileAlignment)
         print(f"Size of headers: {hdr.opt_header.SizeOfHeaders}")
 
         return hdr
+
+    def fix_sections(self, hdr, old_number_of_sections, virtualmemorysize):
+        for i in range(old_number_of_sections - 1):
+            curr_section = hdr.section_list[i]
+            next_section = hdr.section_list[i + 1]
+            self.fix_section(curr_section, next_section.VirtualAddress)
+
+        # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
+        self.fix_section(hdr.section_list[old_number_of_sections - 1], virtualmemorysize - 0x10000)
+
+    def fix_checksum(self, uc, hdr, base_addr, total_size):
+        loaded_img = uc.mem_read(base_addr, total_size)
+        pe = pefile.PE(data=loaded_img)
+        hdr.opt_header.CheckSum = pe.generate_checksum()
+        return hdr
+
+
 
     def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
         ntp = apicall_handler.ntp
@@ -349,51 +363,45 @@ class ImageDump(object):
             return
 
         old_number_of_sections = hdr.pe_header.NumberOfSections
-        hdr = self.add_import_section_api(hdr, virtualmemorysize, total_size, False)
+        print("Setting unpacked Entry Point")
         hdr.opt_header.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
+        print("Set IAT-Directory to 0 (VA and Size)")
+        hdr.data_directories[12].VirtualAddress = 0
+        hdr.data_directories[12].Size = 0
+        print("Relocating Headers to End of Image")
         hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
+        print("Fixing SizeOfImage...")
+        hdr.opt_header.SizeOfImage = alignments(total_size, hdr.opt_header.SectionAlignment)
+        print("Fixing Imports...")
+        hdr = self.fix_imports(uc, hdr, total_size, dllname_to_functionlist)
+        print("Fixing sections")
+        self.fix_sections(hdr, old_number_of_sections, virtualmemorysize)
+        hdr = self.add_import_section_api(hdr, virtualmemorysize, total_size, False)
         hdr.sync(uc)
 
         loaded_img = uc.mem_read(base_addr, total_size)
         pe = pefile.PE(data=loaded_img)
 
 
-        print("Fixing sections")
-        for i in range(old_number_of_sections - 1):
-            curr_section = pe.sections[i]
-            next_section = pe.sections[i + 1]
-            self.fix_section(curr_section, next_section.VirtualAddress)
-
-        # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
-        self.fix_section(pe.sections[old_number_of_sections - 1], virtualmemorysize - 0x10000)
 
         print("Fixing Memory Protection of Sections")
         self.fix_section_mem_protection(pe, ntp)
 
         # Not working new section header in windows loader
         # chunk_sections = self.chunk_to_image_section_hdr(base_addr, apicall_handler.allocated_chunks)
-
-        print("Fixing Imports...")
-        pe = self.fix_imports(uc, pe, dllname_to_functionlist)
-
-        # Set IAT-Directory to 0 (VA and Size)
-        for directory in pe.OPTIONAL_HEADER.DATA_DIRECTORY:
-            if directory.name == "IMAGE_DIRECTORY_ENTRY_IAT":
-                directory.Size = 0
-                directory.VirtualAddress = 0
-                break
-
-        # Not working new section header in windows loader
         # pe = self.fix_header(uc, pe, base_addr, virtualmemorysize, total_size, chunk_sections, number_of_added_sections)
 
-        pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
+        # pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
+
+        print("Fixing Checksum")
+        hdr = self.fix_checksum(uc, hdr, base_addr, total_size)
+        hdr.sync(uc)
 
         print(f"Dumping state to {path}")
         pe.write(path)
 
 
-
 class YZPackDump(ImageDump):
-    def fix_imports(self, uc, pe, dllname_to_functionlist):
-        return super().fix_imports_by_dllname(pe, dllname_to_functionlist)
+    def fix_imports(self, uc, hdr, total_size, dllname_to_functionlist):
+        return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
 
