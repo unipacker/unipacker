@@ -323,6 +323,10 @@ class ImageDump(object):
         # Correct Value of Number of Sections
         hdr.pe_header.NumberOfSections += 1
 
+        # Fix SizeOfImage
+        hdr.opt_header.SizeOfImage = alignments(totalsize, hdr.opt_header.SectionAlignment)
+        print(f"Size of image: {hdr.opt_header.SizeOfImage}, totalsize: {totalsize}")
+
         # Fix SizeOfHeaders
         hdr.opt_header.SizeOfHeaders = alignments(hdr.opt_header.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())),
                                   hdr.opt_header.FileAlignment)
