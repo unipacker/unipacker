@@ -5,7 +5,7 @@ import os
 from unicorn.x86_const import *
 import struct
 
-from headers import print_dos_header, print_all_headers, hdr_read
+from headers import print_dos_header, print_all_headers, hdr_read, PE
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER
 from utils import align, alignments, InvalidPEFile
@@ -308,7 +308,7 @@ class ImageDump(object):
 
 
 
-        # TODO Correct Value of Number of Sections
+        # Correct Value of Number of Sections
         rva_to_number_of_sections = pe.DOS_HEADER.e_lfanew + 4 + 2
         uc.mem_write(base_addr + rva_to_number_of_sections, struct.pack("<H", number_of_sections + 1))
 
@@ -323,79 +323,103 @@ class ImageDump(object):
         print(f"Size of headers: {size_of_hdrs}")
         uc.mem_write(base_addr + rva_to_size_of_headers, struct.pack("<I", size_of_hdrs))
 
-    def header_read_test(self, uc, base_addr):
-        e_lfanew = hdr_read(uc, base_addr, "_IMAGE_DOS_HEADER", "e_lfanew")
-        print(f"e_lfanew: {hex(e_lfanew)}")
-        num_of_sec = hdr_read(uc, base_addr, "_IMAGE_FILE_HEADER", "NumberOfSections")
-        print(f"NumberOfSections: {hex(num_of_sec)}")
-        aep = hdr_read(uc, base_addr, "_IMAGE_OPTIONAL_HEADER", "AddressOfEntryPoint")
-        print(f"AddressOfEntryPoint: {hex(aep)}")
-        iva = hdr_read(uc, base_addr, "IMAGE_DIRECTORY_ENTRY_IMPORT", "VirtualAddress")
-        print(f"IMPORT VirtualAddress: {hex(iva)}")
-        eva = hdr_read(uc, base_addr, "_IMAGE_DATA_DIRECTORY", "VirtualAddress", 0)
-        print(f"EVA: {hex(eva)}")
-        sec1 = hdr_read(uc, base_addr, "IMAGE_SECTION_HEADER", "Name", 0)
-        print(f"Sec1 name: {sec1}")
+    def add_import_section_api(self, hdr, virtualmemorysize, totalsize):
+        rva_to_section_table = hdr.dos_header.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + len(
+            bytes(_IMAGE_OPTIONAL_HEADER()))
+        number_of_sections = hdr.pe_header.NumberOfSections
+        rva_to_section_table += len(bytes(IMAGE_SECTION_HEADER())) * number_of_sections
+        import_section = IMAGE_SECTION_HEADER(
+            bytes(".impdata", 'ascii'),  # Name
+            0x10000,  # VirtualSize
+            virtualmemorysize - 0x10000,  # VirtualAddress
+            0x10000,  # SizeOfRawData
+            virtualmemorysize - 0x10000,  # PointerToRawData
+            0,  # PointerToRelocations
+            0,  # PointerToLinenumbers
+            0,  # NumberOfRelocations
+            0,  # NumberOfLinenumbers
+            0xe0000020,  # Characteristics
+        )
+
+        hdr.section_list.append(import_section)
+
+        # Correct Value of Number of Sections
+        hdr.pe_header.NumberOfSections += 1
+
+        # Fix SizeOfImage
+        hdr.opt_header.SizeOfImage = alignments(totalsize, hdr.opt_header.SectionAlignment)
+        print(f"Size of image: {hdr.opt_header.SizeOfImage}, totalsize: {totalsize}")
+
+        # Fix SizeOfHeaders
+        hdr.opt_header.SizeOfHeaders = alignments(hdr.opt_header.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())),
+                                  hdr.opt_header.FileAlignment)
+        print(f"Size of headers: {hdr.opt_header.SizeOfHeaders}")
+
+        return hdr
 
     def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
+        ntp = apicall_handler.ntp
+        dllname_to_functionlist = apicall_handler.dllname_to_functionlist
+        if len(apicall_handler.allocated_chunks) == 0:
+            total_size = virtualmemorysize
+        else:
+            total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
+
+        # loaded_img = uc.mem_read(base_addr, total_size)
+        # pe = pefile.PE(data=loaded_img)
+
+        # old_number_of_sections = pe.FILE_HEADER.NumberOfSections
+
+        # self.add_import_section(uc, pe, base_addr, virtualmemorysize, total_size)
         try:
-            ntp = apicall_handler.ntp
-            dllname_to_functionlist = apicall_handler.dllname_to_functionlist
-            if len(apicall_handler.allocated_chunks) == 0:
-                total_size = virtualmemorysize
-            else:
-                total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
-
-            # print_all_headers(uc, base_addr)
-            # print("HEADER_READ_TEST")
-            # self.header_read_test(uc, base_addr)
-
-            loaded_img = uc.mem_read(base_addr, total_size)
-            pe = pefile.PE(data=loaded_img)
-
-            old_number_of_sections = pe.FILE_HEADER.NumberOfSections
-
-            self.add_import_section(uc, pe, base_addr, virtualmemorysize, total_size)
-
-            loaded_img = uc.mem_read(base_addr, total_size)
-            pe = pefile.PE(data=loaded_img)
-
-            pe.OPTIONAL_HEADER.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
-
-            print("Fixing sections")
-            for i in range(old_number_of_sections - 1):
-                curr_section = pe.sections[i]
-                next_section = pe.sections[i + 1]
-                self.fix_section(curr_section, next_section.VirtualAddress)
-
-            # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
-            self.fix_section(pe.sections[old_number_of_sections - 1], virtualmemorysize - 0x10000)
-
-            print("Fixing Memory Protection of Sections")
-            self.fix_section_mem_protection(pe, ntp)
-
-            # Not working new section header in windows loader
-            # chunk_sections = self.chunk_to_image_section_hdr(base_addr, apicall_handler.allocated_chunks)
-
-            print("Fixing Imports...")
-            pe = self.fix_imports(uc, pe, dllname_to_functionlist)
-
-            # Set IAT-Directory to 0 (VA and Size)
-            for directory in pe.OPTIONAL_HEADER.DATA_DIRECTORY:
-                if directory.name == "IMAGE_DIRECTORY_ENTRY_IAT":
-                    directory.Size = 0
-                    directory.VirtualAddress = 0
-                    break
-
-            # Not working new section header in windows loader
-            # pe = self.fix_header(uc, pe, base_addr, virtualmemorysize, total_size, chunk_sections, number_of_added_sections)
-
-            pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
-
-            print(f"Dumping state to {path}")
-            pe.write(path)
+            hdr = PE(uc, base_addr)
         except InvalidPEFile as i:
             print("Invalid PE File... Cannot dump")
+            return
+
+        old_number_of_sections = hdr.pe_header.NumberOfSections
+        hdr = self.add_import_section_api(hdr, virtualmemorysize, total_size)
+
+        hdr.sync(uc)
+
+        loaded_img = uc.mem_read(base_addr, total_size)
+        pe = pefile.PE(data=loaded_img)
+
+        pe.OPTIONAL_HEADER.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
+
+        print("Fixing sections")
+        for i in range(old_number_of_sections - 1):
+            curr_section = pe.sections[i]
+            next_section = pe.sections[i + 1]
+            self.fix_section(curr_section, next_section.VirtualAddress)
+
+        # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
+        self.fix_section(pe.sections[old_number_of_sections - 1], virtualmemorysize - 0x10000)
+
+        print("Fixing Memory Protection of Sections")
+        self.fix_section_mem_protection(pe, ntp)
+
+        # Not working new section header in windows loader
+        # chunk_sections = self.chunk_to_image_section_hdr(base_addr, apicall_handler.allocated_chunks)
+
+        print("Fixing Imports...")
+        pe = self.fix_imports(uc, pe, dllname_to_functionlist)
+
+        # Set IAT-Directory to 0 (VA and Size)
+        for directory in pe.OPTIONAL_HEADER.DATA_DIRECTORY:
+            if directory.name == "IMAGE_DIRECTORY_ENTRY_IAT":
+                directory.Size = 0
+                directory.VirtualAddress = 0
+                break
+
+        # Not working new section header in windows loader
+        # pe = self.fix_header(uc, pe, base_addr, virtualmemorysize, total_size, chunk_sections, number_of_added_sections)
+
+        pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
+
+        print(f"Dumping state to {path}")
+        pe.write(path)
+
 
 
 class YZPackDump(ImageDump):

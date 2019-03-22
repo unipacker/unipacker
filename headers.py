@@ -383,5 +383,5 @@ class PE(object):
         combined_payload = pe_payload + opt_payload + section_table_payload
 
         uc.mem_write(dos_offset, dos_payload)
-        uc.mem_write(pe_payload, combined_payload)
+        uc.mem_write(pe_offset, combined_payload)
 
