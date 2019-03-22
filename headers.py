@@ -1,9 +1,9 @@
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
-    _IMAGE_DATA_DIRECTORY
+    _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR
 from ctypes import *
 from datetime import datetime
 
-from utils import InvalidPEFile
+from utils import InvalidPEFile, get_string, ImportValues
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -58,7 +58,6 @@ datadirectory_entry_to_pos = {"IMAGE_DIRECTORY_ENTRY_EXPORT": 0, "IMAGE_DIRECTOR
                               "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14, "IMAGE_DIRECTORY_ENTRY_RESERVED": 15}
 
 
-# TODO Add exception
 def parse_memory_to_header(uc, base_addr, query_header=None):
     # Read DOS Header
     uc_dos = uc.mem_read(base_addr, header_sizes["_IMAGE_DOS_HEADER"])
@@ -111,6 +110,14 @@ def parse_memory_to_header(uc, base_addr, query_header=None):
     if query_header == "_IMAGE_DATA_DIRECTORY":
         return getattr(opt_header, "DataDirectory")
 
+    rva_to_IMAGE_IMPORT_DESCRIPTOR = getattr(getattr(opt_header, "DataDirectory")[1], "VirtualAddress")
+    size_import_table = getattr(getattr(opt_header, "DataDirectory")[1], "Size")
+    import_table = get_imp(uc, rva_to_IMAGE_IMPORT_DESCRIPTOR, base_addr, size_import_table)
+
+    if query_header == "IMPORTS":
+        return import_table
+
+
     # Read Section Header
     section_hdr_offset = opt_hdr_offset + header_sizes["_IMAGE_OPTIONAL_HEADER"]
     section_headers = []
@@ -124,10 +131,39 @@ def parse_memory_to_header(uc, base_addr, query_header=None):
         return section_headers
 
     headers = {"_IMAGE_DOS_HEADER": dos_header, "_IMAGE_FILE_HEADER": pe_header, "_IMAGE_OPTIONAL_HEADER": opt_header,
-               "IMAGE_SECTION_HEADER": section_headers}
+               "IMAGE_SECTION_HEADER": section_headers, "IMPORTS": import_table, }
 
     return headers
 
+
+def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
+    entry_size = len(bytes(IMAGE_IMPORT_DESCRIPTOR()))
+    num_of_dll = SizeOfImporTable // entry_size
+    imp_info_list = []
+    imp_struct_list = []
+    for i in range(num_of_dll):
+        uc_imp = uc.mem_read(rva, entry_size)
+        imp_struct = IMAGE_IMPORT_DESCRIPTOR.from_buffer(uc_imp)
+        imp_struct_list.append(imp_struct)
+        if read_values:
+            dll_name = get_string(getattr(imp_struct, "Name"), uc)
+            imp_names = []
+            rva_to_iat = getattr(imp_struct, "FirstThunk")
+            while True:
+                new_val = uc.mem_read(base_addr+rva_to_iat, 4)
+                if new_val == 0:
+                    break
+                imp_name = get_string(new_val + 2, uc)
+                imp_names.append(imp_name)
+                rva_to_iat += 4
+
+            imp_info_list.append(ImportValues(imp_struct, dll_name, imp_names))
+
+        rva += entry_size
+
+    if read_values:
+        return imp_info_list
+    return imp_struct_list
 
 # Deprecated
 def print_struc(s, offset, name):
@@ -303,7 +339,6 @@ def hdr_read(uc, base_addr, header, field, array_pos=None, str_as_bytes=False):
 
 
 class PE(object):
-    # TODO Setup directory entry import
     def __init__(self, uc, base_addr):
         self.base_addr = base_addr
         headers = parse_memory_to_header(uc, self.base_addr)
@@ -312,9 +347,18 @@ class PE(object):
         self.opt_header = headers["_IMAGE_OPTIONAL_HEADER"]
         self.data_directories = [directory for directory in getattr(headers["_IMAGE_OPTIONAL_HEADER"], "DataDirectory")]
         self.section_list = headers["IMAGE_SECTION_HEADER"]
-        self.DIRECTORY_ENTRY_IMPORT = []
+        self.DIRECTORY_ENTRY_IMPORT = headers["IMPORTS"]
 
-    # Todo include sync of directory entry import
+    def update(self, uc, base_addr):
+        self.base_addr = base_addr
+        headers = parse_memory_to_header(uc, self.base_addr)
+        self.dos_header = headers["_IMAGE_DOS_HEADER"]
+        self.pe_header = headers["_IMAGE_FILE_HEADER"]
+        self.opt_header = headers["_IMAGE_OPTIONAL_HEADER"]
+        self.data_directories = [directory for directory in getattr(headers["_IMAGE_OPTIONAL_HEADER"], "DataDirectory")]
+        self.section_list = headers["IMAGE_SECTION_HEADER"]
+        self.DIRECTORY_ENTRY_IMPORT = headers["IMPORTS"]
+
     def sync(self, uc):
         e_lfanew = self.dos_header.e_lfanew
         num_of_sec = self.pe_header.NumberOfSections

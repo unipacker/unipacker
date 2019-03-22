@@ -78,5 +78,16 @@ def calc_export_offset_of_dll(dllpath, function_name):
     return None
 
 
+class ImportValues(object):
+    def __init__(self, import_struct, name, imports):
+        self.Characteristics = getattr(import_struct, "Characteristics")
+        self.TimeDateStamp = getattr(import_struct, "TimeDateStamp")
+        self.ForwarederChain = getattr(import_struct, "ForwarderChain")
+        self.RVAtoName = getattr(import_struct, "Name")
+        self.Name = name
+        self.RVAtoFirstThunk = getattr(import_struct, "FirstThunk")
+        self.imports = imports
+
+
 class InvalidPEFile(Exception):
     pass

@@ -14,6 +14,7 @@ from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
+from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string
@@ -182,6 +183,29 @@ Show current breakpoints:   b"""
         else:
             print("Emulation not started yet. Starting now...")
             self.do_r(args)
+
+    # TODO do documentation
+    def do_p(self, args):
+
+        mapping = {
+            "d": print_dos_header,
+            "dos": print_dos_header,
+            "p": print_pe_header,
+            "pe": print_pe_header,
+            "o": print_opt_header,
+            "opt": print_opt_header,
+            "a": print_all_headers,
+            "all": print_all_headers,
+            "s": print_section_table,
+            "sections": print_section_table,
+        }
+
+        args_list = args.split(" ")
+
+        for x in args_list:
+            if x in mapping.keys():
+                mapping[x](mu, BASE_ADDR)
+
 
     def do_dump(self, args):
         """Dump the emulated memory to file.
