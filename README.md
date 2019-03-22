@@ -39,6 +39,10 @@ Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/Vi
 pip3 install -r requirements.txt
 python3 unipacker.py
 ```
+**Attention!** It is strongly advised to use the requirements.txt, as we use a custom version of unicorn-engine that differs
+from the PyPi package version. Additionally, one might accidentally install the "yara" package instead of "yara-python",
+which will lead to errors.
+
 For detailed instructions on how to use Un{i}packer please refer to the [Wiki](https://github.com/unipacker/unipacker/wiki).
 Additionally, all of the shell commands are documented. To access this information, use the ```help``` command
 ### Using Docker
