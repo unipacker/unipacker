@@ -14,10 +14,10 @@ from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
-from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table
+from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table, PE
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
-from utils import print_cols, merge, align, remove_range, get_string
+from utils import print_cols, merge, align, remove_range, get_string, convert_to_string
 
 imports = set()
 mu = None
@@ -934,9 +934,16 @@ def init_uc():
     # setup section dict used for custom memory protection
     atn = {}  # Dict Address to Name: (StartVAddr, EndVAddr) -> Name
     ntp = {}  # Dict Name to Protection Tupel: Name -> (Execute, Read, Write)
-    for s in pe.sections:
-        atn[(s.VirtualAddress + BASE_ADDR, s.VirtualAddress + BASE_ADDR + s.Misc_VirtualSize)] = s.Name
-        ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
+
+    new_pe = PE(mu, BASE_ADDR)
+    prot_val = lambda x, y: True if x & y != 0 else False
+    for s in new_pe.section_list:
+        atn[(s.VirtualAddress + BASE_ADDR, s.VirtualAddress + BASE_ADDR + s.VirtualSize)] = convert_to_string(s.Name)
+        ntp[convert_to_string(s.Name)] = (prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000), prot_val(s.Characteristics, 0x80000000))
+
+    # for s in pe.sections:
+    #    atn[(s.VirtualAddress + BASE_ADDR, s.VirtualAddress + BASE_ADDR + s.Misc_VirtualSize)] = s.Name
+    #    ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
 
     # init syscall handling and prepare hook memory for return values
     apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample, atn, ntp)

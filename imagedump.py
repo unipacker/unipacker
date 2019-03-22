@@ -9,7 +9,7 @@ import sys
 from headers import print_dos_header, print_all_headers, hdr_read, PE, pe_write
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER
-from utils import align, alignments, InvalidPEFile
+from utils import align, alignments, InvalidPEFile, convert_to_string
 
 
 class ImageDump(object):
@@ -23,14 +23,24 @@ class ImageDump(object):
 
     def set_protections(self, section, protection):
         x, r, w = protection
-        section.IMAGE_SCN_MEM_EXECUTE = x
-        section.IMAGE_SCN_MEM_READ = r
-        section.IMAGE_SCN_MEM_WRITE = w
+        new_protection = section.Characteristics
+        if x:
+            new_protection = new_protection | 0x20000000
+        if r:
+            new_protection = new_protection | 0x40000000
+        if w:
+            new_protection = new_protection | 0x80000000
 
-    def fix_section_mem_protection(self, pe, ntp):
-        for s in pe.sections:
-            if s.Name in ntp:
-                self.set_protections(s, ntp[s.Name])
+        return new_protection
+
+    def fix_section_mem_protections(self, hdr, ntp):
+        for i in range(len(hdr.section_list)):
+            section_name = convert_to_string(hdr.section_list[i].Name)
+            print(section_name)
+            if section_name in ntp.keys():
+                print(f"Fixing protections for: {section_name} with {ntp[section_name][0], ntp[section_name][1], ntp[section_name][2]}")
+                hdr.section_list[i].Characteristics = self.set_protections(hdr.section_list[i], ntp[section_name])
+        return hdr
 
     # Returns list of addresses where search has been found
     def find_occurences(self, binary, search):
@@ -346,8 +356,6 @@ class ImageDump(object):
         hdr.opt_header.CheckSum = pe.generate_checksum()
         return hdr
 
-
-
     def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
         ntp = apicall_handler.ntp
         dllname_to_functionlist = apicall_handler.dllname_to_functionlist
@@ -363,29 +371,33 @@ class ImageDump(object):
             return
 
         old_number_of_sections = hdr.pe_header.NumberOfSections
+
         print("Setting unpacked Entry Point")
         hdr.opt_header.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
+
         print("Set IAT-Directory to 0 (VA and Size)")
         hdr.data_directories[12].VirtualAddress = 0
         hdr.data_directories[12].Size = 0
+
         print("Relocating Headers to End of Image")
         hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
+
         print("Fixing SizeOfImage...")
         hdr.opt_header.SizeOfImage = alignments(total_size, hdr.opt_header.SectionAlignment)
+
         print("Fixing Imports...")
         hdr = self.fix_imports(uc, hdr, total_size, dllname_to_functionlist)
+
         print("Fixing sections")
         self.fix_sections(hdr, old_number_of_sections, virtualmemorysize)
+
         hdr = self.add_import_section_api(hdr, virtualmemorysize, total_size, False)
+
         hdr.sync(uc)
 
-        loaded_img = uc.mem_read(base_addr, total_size)
-        pe = pefile.PE(data=loaded_img)
-
-
-
         print("Fixing Memory Protection of Sections")
-        self.fix_section_mem_protection(pe, ntp)
+        hdr = self.fix_section_mem_protections(hdr, ntp)
+        hdr.sync(uc)
 
         # Not working new section header in windows loader
         # chunk_sections = self.chunk_to_image_section_hdr(base_addr, apicall_handler.allocated_chunks)
@@ -398,7 +410,7 @@ class ImageDump(object):
         hdr.sync(uc)
 
         print(f"Dumping state to {path}")
-        pe.write(path)
+        pe_write(uc, base_addr, total_size, path)
 
 
 class YZPackDump(ImageDump):

@@ -55,6 +55,8 @@ def remove_range(old_range, to_remove):
     # range unaffected
     return [(old_lower, old_upper)]
 
+def convert_to_string(b):
+    return b.rstrip(b'\x00').decode('ascii')
 
 def get_string(ptr, uc):
     buf = ""

@@ -87,8 +87,9 @@ class WinApiCalls(object):
             0x40: (True, True, True),  # 0x40 PAGE_EXECUTE_READWRITE
             0x80: (True, True, True),  # 0x80 PAGE_EXECUTE_WRITECOPY
         }
+        print(f"VP Address: {hex(address)} Size: {hex(size)}, Newprot: {hex(new_protect)}")
         for saddr, eaddr in self.atn.keys():
-            if saddr <= address <= eaddr and new_protect in memory_protection:
+            if (address <= saddr <= address+size or address <= eaddr <= address+size) and new_protect in memory_protection:
                 name = self.atn[(saddr, eaddr)]
                 self.ntp[name] = memory_protection[new_protect]
         return new_protect
@@ -115,6 +116,7 @@ class WinApiCalls(object):
         self.module_handles[handle] = get_string(module_name_ptr, uc)
         return handle
 
+    # TODO Apply protections to alloc chunks
     @api_call()
     def VirtualAlloc(self, uc, esp, log, address, size, t, protection):
         log and print(
