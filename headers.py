@@ -235,7 +235,6 @@ def inject_section(uc, base_addr, sec_struct):
     uc.mem_write(eoff, payload)
 
 
-
 # TODO broken
 def hdr_write(uc, base_addr, header, array_pos, **fields):
     if header in short_hdr_names.keys():
@@ -304,6 +303,7 @@ def hdr_read(uc, base_addr, header, field, array_pos=None, str_as_bytes=False):
 
 
 class PE(object):
+    # TODO Setup directory entry import
     def __init__(self, uc, base_addr):
         self.base_addr = base_addr
         headers = parse_memory_to_header(uc, self.base_addr)
@@ -312,7 +312,9 @@ class PE(object):
         self.opt_header = headers["_IMAGE_OPTIONAL_HEADER"]
         self.data_directories = [directory for directory in getattr(headers["_IMAGE_OPTIONAL_HEADER"], "DataDirectory")]
         self.section_list = headers["IMAGE_SECTION_HEADER"]
+        self.DIRECTORY_ENTRY_IMPORT = []
 
+    # Todo include sync of directory entry import
     def sync(self, uc):
         e_lfanew = self.dos_header.e_lfanew
         num_of_sec = self.pe_header.NumberOfSections

@@ -347,8 +347,8 @@ class ImageDump(object):
                 total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
 
             # print_all_headers(uc, base_addr)
-            print("HEADER_READ_TEST")
-            self.header_read_test(uc, base_addr)
+            # print("HEADER_READ_TEST")
+            # self.header_read_test(uc, base_addr)
 
             loaded_img = uc.mem_read(base_addr, total_size)
             pe = pefile.PE(data=loaded_img)
