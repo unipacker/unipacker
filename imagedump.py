@@ -4,6 +4,7 @@ import pefile
 import os
 from unicorn.x86_const import *
 import struct
+import sys
 
 from headers import print_dos_header, print_all_headers, hdr_read, PE
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
@@ -323,7 +324,24 @@ class ImageDump(object):
         print(f"Size of headers: {size_of_hdrs}")
         uc.mem_write(base_addr + rva_to_size_of_headers, struct.pack("<I", size_of_hdrs))
 
-    def add_import_section_api(self, hdr, virtualmemorysize, totalsize):
+    def add_import_section_api(self, hdr, virtualmemorysize, totalsize, check_space=True):
+        # Set check_space to false if the pe-header was relocated
+
+        if check_space:
+            rva_to_section_table = hdr.dos_header.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + len(bytes(_IMAGE_OPTIONAL_HEADER()))
+            number_of_sections = hdr.pe_header.NumberOfSections
+            end_of_section_table = rva_to_section_table + len(bytes(IMAGE_SECTION_HEADER())) * number_of_sections
+
+            beginning_of_first_section = sys.maxsize
+
+            for section in hdr.section_list:
+                if section.VirtualAddress < beginning_of_first_section:
+                    beginning_of_first_section = section.VirtualAddress
+
+            if end_of_section_table + len(bytes(IMAGE_SECTION_HEADER())) >= beginning_of_first_section:
+                print("Not enough space for additional section")
+                return
+
         rva_to_section_table = hdr.dos_header.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + len(
             bytes(_IMAGE_OPTIONAL_HEADER()))
         number_of_sections = hdr.pe_header.NumberOfSections
