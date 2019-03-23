@@ -165,7 +165,7 @@ class FSGUnpacker(DefaultUnpacker):
 class YZPackUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
-        self.allowed_sections = ['.yzpack']
+        self.allowed_sections = ['.yzpack', '.yzpack2']
         self.dumper = YZPackDump()
 
     def get_entrypoint(self):

@@ -111,3 +111,4 @@ __pycache__
 # End of https://www.gitignore.io/api/tex
 /.unpacker_history
 /unpacked.exe
+/.unipacker_brokenimport.exe
