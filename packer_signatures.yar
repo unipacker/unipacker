@@ -104,6 +104,7 @@ rule yzpack{
         date = "2019-02-28"
     strings:
         $yz = ".yzpack"
+        $yz2 = ".yzpack2"
     condition:
-        pe32 and $yz
+        pe32 and ($yz or $yz2)
 }
