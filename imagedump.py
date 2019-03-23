@@ -242,7 +242,7 @@ class ImageDump(object):
         if len(apicall_handler.allocated_chunks) == 0:
             total_size = virtualmemorysize
         else:
-            total_size = sorted(apicall_handler.allocated_chunks)[:-1][1] - base_addr
+            total_size = sorted(apicall_handler.allocated_chunks)[-1][1] - base_addr
 
         try:
             hdr = PE(uc, base_addr)

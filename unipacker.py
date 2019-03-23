@@ -965,8 +965,6 @@ def init_uc():
 
     hdr = PE(mu, BASE_ADDR)
 
-    print(f"{hex(hdr.data_directories[1].VirtualAddress)}")
-
     # TODO below new version but needs testing as it is crashing
     #import_table = get_imp(mu, hdr.data_directories[1].VirtualAddress, BASE_ADDR, hdr.data_directories[1].Size, True)
     #for lib in import_table:
