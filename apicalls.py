@@ -87,7 +87,6 @@ class WinApiCalls(object):
             0x40: (True, True, True),  # 0x40 PAGE_EXECUTE_READWRITE
             0x80: (True, True, True),  # 0x80 PAGE_EXECUTE_WRITECOPY
         }
-        print(f"VP Address: {hex(address)} Size: {hex(size)}, Newprot: {hex(new_protect)}")
         for saddr, eaddr in self.atn.keys():
             if (address <= saddr <= address+size or address <= eaddr <= address+size) and new_protect in memory_protection:
                 name = self.atn[(saddr, eaddr)]

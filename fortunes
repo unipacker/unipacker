@@ -4,7 +4,6 @@ Did you ever ask yourself which packer was used to pack this shell?
 This may randomly stop working
 If you do not know what you are doing, stop it. If you know what you are doing, stop it as well.
 Some say, there was a day when the shell worked flawlessly
-Der Text hier ist fast so unverständlich wie Assembler
 Segmentation fault. (Core dumped)
 Process finished with exit code 1
 samuel@probook ~$

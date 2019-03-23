@@ -126,7 +126,7 @@ class ImageDump(object):
     def fix_imports_by_rebuilding(self, uc, hdr, total_size, dllname_to_function_list):
         return hdr
 
-    # TODO Fix
+    # TODO Dummy
     def fix_imports(self, uc, hdr, total_size, dllname_to_functionlist):
         pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
         with open(".unipacker_brokenimport.exe", 'rb') as f:
@@ -140,163 +140,44 @@ class ImageDump(object):
         os.remove(".unipacker_brokenimport.exe")
         return hdr
 
-    def fix_header(self, uc, parse_pe, base_addr, virtualmemorysize, total_size, chunk_sections, number_of_added_sections):
 
-        custom_import_table = False
-
-        if parse_pe.OPTIONAL_HEADER.AddressOfEntryPoint == virtualmemorysize - 0x10000:
-            number_of_added_sections += 1
-            custom_import_table = True
-
-        total_sections_c = parse_pe.FILE_HEADER.NumberOfSections + number_of_added_sections
-
-        dos_header = _IMAGE_DOS_HEADER(
-            parse_pe.DOS_HEADER.e_magic,
-            parse_pe.DOS_HEADER.e_cblp,
-            parse_pe.DOS_HEADER.e_cp,
-            parse_pe.DOS_HEADER.e_crlc,
-            parse_pe.DOS_HEADER.e_cparhdr,
-            parse_pe.DOS_HEADER.e_minalloc,
-            parse_pe.DOS_HEADER.e_maxalloc,
-            parse_pe.DOS_HEADER.e_ss,
-            parse_pe.DOS_HEADER.e_sp,
-            parse_pe.DOS_HEADER.e_csum,
-            parse_pe.DOS_HEADER.e_ip,
-            parse_pe.DOS_HEADER.e_cs,
-            parse_pe.DOS_HEADER.e_lfarlc,
-            parse_pe.DOS_HEADER.e_ovno,
-            parse_pe.DOS_HEADER.e_res,
-            parse_pe.DOS_HEADER.e_oemid,
-            parse_pe.DOS_HEADER.e_oeminfo,
-            parse_pe.DOS_HEADER.e_res2,
-            virtualmemorysize - 0x19000,  # PTR to new PE Header
-        )
-
-        pe_header = _IMAGE_FILE_HEADER(
-            0x4550,
-            parse_pe.FILE_HEADER.Machine,
-            parse_pe.FILE_HEADER.NumberOfSections + number_of_added_sections,
-            parse_pe.FILE_HEADER.TimeDateStamp,
-            parse_pe.FILE_HEADER.PointerToSymbolTable,
-            parse_pe.FILE_HEADER.NumberOfSymbols,
-            parse_pe.FILE_HEADER.SizeOfOptionalHeader,  # SizeOfOptionalHeader
-            parse_pe.FILE_HEADER.Characteristics,
-        )
-
-        # No changes in the import direcotory. Import fixing later
-        data_directory_list = []
-
-        for data_directory_entry in parse_pe.OPTIONAL_HEADER.DATA_DIRECTORY:
-            entry = _IMAGE_DATA_DIRECTORY(
-                data_directory_entry.VirtualAddress,
-                data_directory_entry.Size,
-            )
-            data_directory_list.append(entry)
-
-        data_directory_array = _IMAGE_DATA_DIRECTORY * 16
-        data_directory = data_directory_array(*list(data_directory_list))
-
-        opt_header = _IMAGE_OPTIONAL_HEADER(
-            parse_pe.OPTIONAL_HEADER.Magic,
-            parse_pe.OPTIONAL_HEADER.MajorLinkerVersion,
-            parse_pe.OPTIONAL_HEADER.MinorLinkerVersion,
-            parse_pe.OPTIONAL_HEADER.SizeOfCode,
-            parse_pe.OPTIONAL_HEADER.SizeOfInitializedData,
-            parse_pe.OPTIONAL_HEADER.SizeOfUninitializedData,
-            parse_pe.OPTIONAL_HEADER.AddressOfEntryPoint,
-            parse_pe.OPTIONAL_HEADER.BaseOfCode,
-            parse_pe.OPTIONAL_HEADER.BaseOfData,
-            parse_pe.OPTIONAL_HEADER.ImageBase,
-            parse_pe.OPTIONAL_HEADER.SectionAlignment,
-            parse_pe.OPTIONAL_HEADER.FileAlignment,
-            parse_pe.OPTIONAL_HEADER.MajorOperatingSystemVersion,
-            parse_pe.OPTIONAL_HEADER.MinorOperatingSystemVersion,
-            parse_pe.OPTIONAL_HEADER.MajorImageVersion,
-            parse_pe.OPTIONAL_HEADER.MinorImageVersion,
-            parse_pe.OPTIONAL_HEADER.MajorSubsystemVersion,
-            parse_pe.OPTIONAL_HEADER.MinorSubsystemVersion,
-            0,
-            align(total_size, page_size=parse_pe.OPTIONAL_HEADER.SectionAlignment),  # SizeOfImage
-            align(4 + 4 + len(bytes(_IMAGE_FILE_HEADER())) + len(bytes(_IMAGE_OPTIONAL_HEADER())) + (total_sections_c * len(bytes(IMAGE_SECTION_HEADER()))), page_size=parse_pe.OPTIONAL_HEADER.FileAlignment),  # SizeOfHeaders
-            parse_pe.OPTIONAL_HEADER.CheckSum,
-            parse_pe.OPTIONAL_HEADER.Subsystem,
-            parse_pe.OPTIONAL_HEADER.DllCharacteristics,
-            parse_pe.OPTIONAL_HEADER.SizeOfStackReserve,
-            parse_pe.OPTIONAL_HEADER.SizeOfStackCommit,
-            parse_pe.OPTIONAL_HEADER.SizeOfHeapReserve,
-            parse_pe.OPTIONAL_HEADER.SizeOfHeapCommit,
-            parse_pe.OPTIONAL_HEADER.LoaderFlags,
-            parse_pe.OPTIONAL_HEADER.NumberOfRvaAndSizes,
-            data_directory
-        )
-
-        original_section_structs = []
-        original_sections = parse_pe.sections
-        for os in original_sections:
-            section_struct = IMAGE_SECTION_HEADER(
-                os.Name,  # Name
-                os.Misc_VirtualSize,  # VirtualSize
-                os.VirtualAddress,  # VirtualAddress
-                os.SizeOfRawData,  # SizeOfRawData
-                os.PointerToRawData,  # PointerToRawData
-                os.PointerToRelocations,  # PointerToRelocations
-                os.PointerToLinenumbers,  # PointerToLinenumbers
-                os.NumberOfRelocations,  # NumberOfRelocations
-                os.NumberOfLinenumbers,  # NumberOfLinenumbers
-                os.Characteristics,  # Characteristics
-            )
-            original_section_structs.append(section_struct)
-
-        # TODO Create Section for new import table
-        if custom_import_table:
-            pass
-
-        # Write into memory
-        dos_header_payload = bytes(dos_header)
-        pe_header_payload = bytes(pe_header)
-        opt_header_payload = bytes(opt_header)
-        section_list = original_section_structs + chunk_sections
-        section_array = IMAGE_SECTION_HEADER * total_sections_c
-        section_payload = bytes(section_array(*list(section_list)))
-
-        new_start_addr = (base_addr + virtualmemorysize) - 0x19000
-
-        uc.mem_write(base_addr, dos_header_payload)
-        uc.mem_write(new_start_addr, pe_header_payload + opt_header_payload + section_payload)
-
-        print(f"virtualmemorysize = {virtualmemorysize}, base_addr = {base_addr}, totalsize = {total_size}")
-
-        correct_loaded_img = uc.mem_read(base_addr, total_size)
-        with open(f"unp.dump", 'wb') as f:
-            f.write(correct_loaded_img)
-        with open("newhdr.dump", 'wb') as f:
-            f.write(pe_header_payload + opt_header_payload + section_payload)
-        pe = pefile.PE(data=correct_loaded_img)
-        return pe
-
-    def chunk_to_image_section_hdr(self, base_addr, allocated_chunks):
-        chunk_sections = []
+    def chunk_to_image_section_hdr(self, hdr, base_addr, allocated_chunks):
         number_of_added_sections = 0
         for chunk_start, chunk_end in allocated_chunks:
             chunk_vaddr = chunk_start - base_addr
             chunk_size = chunk_end - chunk_start
-            chunk_section_struct = IMAGE_SECTION_HEADER(
-                bytes(f".ach{number_of_added_sections}", 'ascii'),  # Name
-                chunk_size,  # VirtualSize
-                chunk_vaddr,  # VirtualAddress
-                chunk_size,  # SizeOfRawData
-                chunk_vaddr,  # PointerToRawData
-                0,  # PointerToRelocations
-                0,  # PointerToLinenumbers
-                0,  # NumberOfRelocations
-                0,  # NumberOfLineNumbers
-                0xe0000020,  # Characteristics
-            )
-            chunk_sections.append(chunk_section_struct)
+            hdr = self.add_section(hdr, f".ach{number_of_added_sections}", chunk_size, chunk_vaddr)
             number_of_added_sections += 1
-        return chunk_sections
+        return hdr
 
+    # TODO Set characteristics from VirtualAlloc
+    def add_section(self, hdr, name, VirtualSize, VirtualAddress, Characteristics=0xe0000020):
+        if len(name) > 8:
+            print("Error section name too long")
+            return
+        import_section_hdr = IMAGE_SECTION_HEADER(
+            bytes(name, 'ascii'),  # Name
+            VirtualSize,  # VirtualSize
+            VirtualAddress,  # VirtualAddress
+            VirtualSize,  # SizeOfRawData
+            VirtualAddress,  # PointerToRawData
+            0,  # PointerToRelocations
+            0,  # PointerToLinenumbers
+            0,  # NumberOfRelocations
+            0,  # NumberOfLinenumbers
+            Characteristics,  # Characteristics
+        )
 
+        hdr.section_list.append(import_section_hdr)
+
+        # Correct Value of Number of Sections
+        hdr.pe_header.NumberOfSections += 1
+
+        # Fix SizeOfHeaders
+        hdr.opt_header.SizeOfHeaders = alignments(hdr.opt_header.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())),
+                                                  hdr.opt_header.FileAlignment)
+
+        return hdr
 
     def add_import_section_api(self, hdr, virtualmemorysize, totalsize, check_space=True):
         # Set check_space to false if the pe-header was relocated
@@ -337,7 +218,6 @@ class ImageDump(object):
         # Fix SizeOfHeaders
         hdr.opt_header.SizeOfHeaders = alignments(hdr.opt_header.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())),
                                   hdr.opt_header.FileAlignment)
-        print(f"Size of headers: {hdr.opt_header.SizeOfHeaders}")
 
         return hdr
 
@@ -375,35 +255,39 @@ class ImageDump(object):
         print("Setting unpacked Entry Point")
         hdr.opt_header.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
 
-        print("Set IAT-Directory to 0 (VA and Size)")
-        hdr.data_directories[12].VirtualAddress = 0
-        hdr.data_directories[12].Size = 0
-
-        print("Relocating Headers to End of Image")
-        hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
-
-        print("Fixing SizeOfImage...")
-        hdr.opt_header.SizeOfImage = alignments(total_size, hdr.opt_header.SectionAlignment)
-
         print("Fixing Imports...")
         hdr = self.fix_imports(uc, hdr, total_size, dllname_to_functionlist)
 
         print("Fixing sections")
         self.fix_sections(hdr, old_number_of_sections, virtualmemorysize)
 
-        hdr = self.add_import_section_api(hdr, virtualmemorysize, total_size, False)
+        print("Set IAT-Directory to 0 (VA and Size)")
+        hdr.data_directories[12].VirtualAddress = 0
+        hdr.data_directories[12].Size = 0
+
+        if virtualmemorysize <= hdr.data_directories[1].VirtualAddress <= total_size or len(apicall_handler.allocated_chunks) != 0:
+            print("Relocating Headers to End of Image")
+            hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
+            hdr = self.add_section(hdr, '.newhdr', 0x2000, virtualmemorysize-0x10000)
+            print("Adding new import section")
+            hdr = self.add_section(hdr, '.nimdata', 0x8000, (virtualmemorysize - 0x10000) + 0x2000)
+            print("Appending allocated chunks at the end of the image")
+            hdr = self.chunk_to_image_section_hdr(hdr, base_addr, apicall_handler.allocated_chunks)
+
+        else:
+            virtualmemorysize -= 0x10000
+            total_size = virtualmemorysize
 
         hdr.sync(uc)
+
+
+        print("Fixing SizeOfImage...")
+        hdr.opt_header.SizeOfImage = alignments(total_size, hdr.opt_header.SectionAlignment)
 
         print("Fixing Memory Protection of Sections")
         hdr = self.fix_section_mem_protections(hdr, ntp)
+
         hdr.sync(uc)
-
-        # Not working new section header in windows loader
-        # chunk_sections = self.chunk_to_image_section_hdr(base_addr, apicall_handler.allocated_chunks)
-        # pe = self.fix_header(uc, pe, base_addr, virtualmemorysize, total_size, chunk_sections, number_of_added_sections)
-
-        # pe.OPTIONAL_HEADER.CheckSum = pe.generate_checksum()
 
         print("Fixing Checksum")
         hdr = self.fix_checksum(uc, hdr, base_addr, total_size)
