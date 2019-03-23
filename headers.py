@@ -1,9 +1,11 @@
+from unicorn import UcError
+
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
     _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR
 from ctypes import *
 from datetime import datetime
-
-from utils import InvalidPEFile, get_string, ImportValues
+import struct
+from utils import InvalidPEFile, get_string, ImportValues, get_string2
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -137,6 +139,7 @@ def parse_memory_to_header(uc, base_addr, query_header=None):
 
 
 def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
+    rva += base_addr
     entry_size = len(bytes(IMAGE_IMPORT_DESCRIPTOR()))
     num_of_dll = SizeOfImporTable // entry_size
     imp_info_list = []
@@ -146,18 +149,21 @@ def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
         imp_struct = IMAGE_IMPORT_DESCRIPTOR.from_buffer(uc_imp)
         imp_struct_list.append(imp_struct)
         if read_values:
-            dll_name = get_string(getattr(imp_struct, "Name"), uc)
-            imp_names = []
-            rva_to_iat = getattr(imp_struct, "FirstThunk")
-            while True:
-                new_val = uc.mem_read(base_addr+rva_to_iat, 4)
-                if new_val == 0:
-                    break
-                imp_name = get_string(new_val + 2, uc)
-                imp_names.append(imp_name)
-                rva_to_iat += 4
+            try:
+                dll_name = get_string2(getattr(imp_struct, "Name") + base_addr, uc)
+                imp_names = []
+                rva_to_iat = getattr(imp_struct, "FirstThunk")
+                while True:
+                    new_val = struct.unpack("<I", uc.mem_read(base_addr+rva_to_iat, 4))[0]
+                    if new_val == 0:
+                        break
+                    imp_name = (get_string2(new_val + 2 + base_addr, uc), rva_to_iat)
+                    imp_names.append(imp_name)
+                    rva_to_iat += 4
 
-            imp_info_list.append(ImportValues(imp_struct, dll_name, imp_names))
+                imp_info_list.append(ImportValues(imp_struct, dll_name, imp_names))
+            except UcError as ue:
+                return imp_info_list
 
         rva += entry_size
 

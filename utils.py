@@ -1,5 +1,6 @@
 import struct
 import pefile
+import string
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -57,6 +58,20 @@ def remove_range(old_range, to_remove):
 
 def convert_to_string(b):
     return b.rstrip(b'\x00').decode('ascii')
+
+def get_string2(ptr, uc):
+    printable_chars = bytes(string.printable, 'ascii')
+    buf = b''
+    i = 0
+    while True:
+        b = uc.mem_read(ptr + i, 1)
+        if b in printable_chars:
+            buf += b
+            i += 1
+        else:
+            break
+    return buf if len(buf) != 0 else None
+
 
 def get_string(ptr, uc):
     buf = ""

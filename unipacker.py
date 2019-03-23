@@ -14,7 +14,8 @@ from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
-from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table, PE
+from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table, PE, \
+    get_imp
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string, convert_to_string
@@ -961,6 +962,22 @@ def init_uc():
             imports.add(func_name)
             curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
             mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
+
+    hdr = PE(mu, BASE_ADDR)
+
+    print(f"{hex(hdr.data_directories[1].VirtualAddress)}")
+
+    # TODO below new version but needs testing as it is crashing
+    #import_table = get_imp(mu, hdr.data_directories[1].VirtualAddress, BASE_ADDR, hdr.data_directories[1].Size, True)
+    #for lib in import_table:
+    #    for func_name, func_addr in lib.imports:
+    #        func_name = func_name if func_name is not None else f"no name: 0x{func_addr:02x}"
+    #        dll_name = lib.Name if lib.Name is not None else "-- unknown --"
+    #        imports.add(func_name)
+    #        curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
+    #        mu.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
+
+
 
     # Patch DLLs with hook
     # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll

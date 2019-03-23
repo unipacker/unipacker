@@ -3,7 +3,7 @@ import sys
 import r2pipe
 import yara
 
-from imagedump import ImageDump, YZPackDump
+from imagedump import ImageDump, YZPackDump, ASPackDump
 
 
 class DefaultUnpacker(object):
@@ -136,6 +136,7 @@ class ASPackUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = ['.aspack']
+        self.dumper = ASPackDump()
 
     def get_entrypoint(self):
         return None
