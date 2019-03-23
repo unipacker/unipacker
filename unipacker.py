@@ -700,12 +700,8 @@ def hook_code(uc, address, size, user_data):
     if address in apicall_handler.hooks:
         esp = uc.reg_read(UC_X86_REG_ESP)
         api_call_name = apicall_handler.hooks[address]
-        ret = 0
-        if api_call_name in apicall_handler.apicall_mapping:
-            ret, esp = apicall_handler.apicall(apicall_handler.hooks[address], uc, esp, log_syscalls)
-        else:
-            args = struct.unpack("<IIIIII", uc.mem_read(esp + 4, 24))
-            print(f"Unimplemented API call at 0x{address:02x}: {api_call_name}, first 6 stack items: {list(map(hex, args))}")
+        ret, esp = apicall_handler.apicall(address, api_call_name, uc, esp, log_syscalls)
+
         if api_call_name not in api_calls:
             api_calls[api_call_name] = 1
         else:

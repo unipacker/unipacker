@@ -1,33 +1,44 @@
 import struct
+from inspect import signature
 
 import pefile
-from unicorn.x86_const import *
+from unicorn.x86_const import UC_X86_REG_EAX
 
 from utils import align, merge, remove_range, print_cols, get_string
+
+apicall_mapping = {}
+
+
+def api_call(*names):
+    def apicall_wrapper(func):
+        def wrapper(self, uc, esp, log, *args):
+            # get the return address and the emulated args from the stack (total: 4B ret_addr + 4B * #args)
+            num_args = len(signature(func).parameters) - 4  # self, uc, esp and log are not of interest
+            ret_addr, *args = struct.unpack(f"<I{'I' * num_args}", uc.mem_read(esp, 4 * (num_args + 1)))
+
+            # let the API call see the original stack
+            original_esp = esp + 4 * (num_args + 1)
+            # pass the collected arguments to the API call and retrieve the return value
+            ret_value = func(self, uc, original_esp, log, *args)
+            log and print(f"\tReturn address: 0x{ret_addr:02x}")
+
+            # re-place the return address on the stack (decrements esp by 4)
+            uc.mem_write(original_esp - 4, struct.pack("<I", ret_addr))
+            return ret_value, original_esp - 4
+
+        if not names:
+            apicall_mapping[func.__name__] = wrapper
+        else:
+            for name in names:
+                apicall_mapping[name] = wrapper
+        return wrapper
+
+    return apicall_wrapper
 
 
 class WinApiCalls(object):
 
     def __init__(self, base_addr, virtualmemorysize, hook_addr, breakpoints, sample):
-        self.apicall_mapping = {
-            "GetActiveWindow": self.GetActiveWindow,
-            "GetLastActivePopup": self.GetLastActivePopup,
-            "GetModuleFileNameA": self.GetModuleFileNameA,
-            "GetModuleHandleA": self.GetModuleHandleA,
-            "GetProcAddress": self.GetProcAddress,
-            "GetVersion": self.GetVersion,
-            "GlobalAlloc": self.GlobalAlloc,
-            "HeapCreate": self.HeapCreate,
-            "HeapDestroy": self.HeapDestroy,
-            "InitializeCriticalSection": self.InitializeCriticalSection,
-            "IsDebuggerPresent": self.IsDebuggerPresent,
-            "LoadLibraryA": self.LoadLibraryA,
-            "LoadLibraryW": self.LoadLibraryA,
-            "MessageBoxA": self.MessageBoxA,
-            "VirtualAlloc": self.VirtualAlloc,
-            "VirtualFree": self.VirtualFree,
-            "VirtualProtect": self.VirtualProtect,
-        }
         self.base_addr = base_addr
         self.virtualmemorysize = virtualmemorysize
         self.hook_addr = hook_addr
@@ -45,35 +56,35 @@ class WinApiCalls(object):
         self.heaps = {}
         self.next_heap_handle = self.hook_addr + 0x10000
 
-    def apicall(self, name, uc, esp, log):
-        return self.apicall_mapping[name](uc, esp, log)
+    def apicall(self, address, name, uc, esp, log):
+        try:
+            return apicall_mapping[name](self, uc, esp, log)
+        except KeyError:
+            args = struct.unpack("<IIIIII", uc.mem_read(esp + 4, 24))
+            print(f"Unimplemented API call at 0x{address:02x}: {name}, first 6 stack items: {list(map(hex, args))}")
+            return 0, esp
 
+    @api_call()
     def IsDebuggerPresent(self, uc, esp, log):
-        """No arguments"""
-        return 0, esp
+        """Not present, of course"""
+        return 0
 
-    def VirtualProtect(self, uc, esp, log):
-        """4 arguments, we have to clean up"""
-        eip, address, size, new_protect, old_protect_ptr = struct.unpack("<IIIII", uc.mem_read(esp, 20))
+    @api_call()
+    def VirtualProtect(self, uc, esp, log, address, size, new_protect, old_protect_ptr):
         log and print(f"VirtualProtect: address 0x{address:02x}, size 0x{size:02x}, mode 0x{new_protect:02x}, "
                       f"write old mode to 0x{old_protect_ptr:02x}")
-        uc.mem_write(esp + 16, struct.pack("<I", eip))
-        return new_protect, esp + 16
+        return new_protect
 
-    def GlobalAlloc(self, uc, esp, log):
-        """2 arguments, we have to clean up"""
-        eip, flags, size = struct.unpack("<III", uc.mem_read(esp, 12))
-        log and print(f"GlobalAlloc: eip 0x{eip:02x} flags 0x{flags:02x}, size 0x{size:02x}")
-        uc.mem_write(esp + 8, struct.pack("<I", eip))
+    @api_call()
+    def GlobalAlloc(self, uc, esp, log, flags, size):
+        log and print(f"GlobalAlloc: flags 0x{flags:02x}, size 0x{size:02x}")
         aligned_address = self.alloc(log, size, uc)
-        return aligned_address, esp + 8
+        return aligned_address
 
-    def GetModuleHandleA(self, uc, esp, log):
-        """1 argument, we have to clean up"""
-        eip, module_name_ptr = struct.unpack("<II", uc.mem_read(esp, 8))
+    @api_call()
+    def GetModuleHandleA(self, uc, esp, log, module_name_ptr):
         module_name = get_string(module_name_ptr, uc)
-        log and print(f"GetModuleHandleA: 0x{eip:02x} module_name_ptr 0x{module_name_ptr:02x}: {module_name}")
-        uc.mem_write(esp + 4, struct.pack("<I", eip))
+        log and print(f"GetModuleHandleA: module_name_ptr 0x{module_name_ptr:02x}: {module_name}")
 
         if not module_name_ptr:
             pe = pefile.PE(self.sample)
@@ -84,20 +95,19 @@ class WinApiCalls(object):
         handle = self.base_addr + self.module_handle_offset
         self.module_handle_offset += 1
         self.module_handles[handle] = get_string(module_name_ptr, uc)
-        return handle, esp + 4
+        return handle
 
-    def VirtualAlloc(self, uc, esp, log):
-        eip, address, size, t, protection = struct.unpack("<IIIII", uc.mem_read(esp, 20))
+    @api_call()
+    def VirtualAlloc(self, uc, esp, log, address, size, t, protection):
         log and print(
-            f"VirtualAlloc: 0x{eip:02x} address: 0x{address:02x}, size 0x{size:02x}, type 0x{t:02x}, protection 0x{protection:02x}")
-        uc.mem_write(esp + 16, struct.pack("<I", eip))
+            f"VirtualAlloc: address: 0x{address:02x}, size 0x{size:02x}, type 0x{t:02x}, protection 0x{protection:02x}")
         if address == 0:
             offset = None
         else:
             offset = address
         aligned_address = self.alloc(log, size, uc, offset)
         uc.reg_write(UC_X86_REG_EAX, aligned_address)
-        return aligned_address, esp + 16
+        return aligned_address
 
     def alloc(self, log, size, uc, offset=None):
         page_size = 4 * 1024
@@ -120,7 +130,8 @@ class WinApiCalls(object):
                 if aligned_address + aligned_size <= chunk_end:
                     log and print(f"\tAlready fully mapped")
                 else:
-                    log and print(f"\tMapping missing piece 0x{chunk_end + 1:02x} to 0x{aligned_address + aligned_size:02x}")
+                    log and print(
+                        f"\tMapping missing piece 0x{chunk_end + 1:02x} to 0x{aligned_address + aligned_size:02x}")
                     uc.mem_map(chunk_end, aligned_address + aligned_size - chunk_end)
                 mapped_partial = True
                 break
@@ -133,10 +144,9 @@ class WinApiCalls(object):
         self.alloc_sizes[aligned_address] = aligned_size
         return aligned_address
 
-    def VirtualFree(self, uc, esp, log):
-        eip, address, size, free_type = struct.unpack("<IIII", uc.mem_read(esp, 16))
-        log and print(f"VirtualFree: 0x{eip:02x}, chunk to free: 0x{address:02x}, size 0x{size:02x}, type 0x{free_type:02x}")
-        uc.mem_write(esp + 12, struct.pack("<I", eip))
+    @api_call()
+    def VirtualFree(self, uc, esp, log, address, size, free_type):
+        log and print(f"VirtualFree: chunk to free: 0x{address:02x}, size 0x{size:02x}, type 0x{free_type:02x}")
         new_chunks = []
         success = False
         for start, end in sorted(self.allocated_chunks):
@@ -164,19 +174,19 @@ class WinApiCalls(object):
         self.allocated_chunks = list(merge(new_chunks))
         log and self.print_allocs()
         if success:
-            return 1, esp + 12
+            return 1
         log and print("\tAddress range not allocated!")
-        return 0, esp + 12
+        return 0
 
-    def GetProcAddress(self, uc, esp, log):
-        eip, module_handle, proc_name_ptr = struct.unpack("<III", uc.mem_read(esp, 12))
+    @api_call()
+    def GetProcAddress(self, uc, esp, log, module_handle, proc_name_ptr):
         proc_name = get_string(proc_name_ptr, uc)
         try:
             module_name = self.module_handles[module_handle]
         except KeyError:
             module_name = "?"
         log and print(
-            f"GetProcAddress: 0x{eip:02x} module handle 0x{module_handle:02x}: {module_name}, proc_name_ptr 0x{proc_name_ptr:02x}: {proc_name}")
+            f"GetProcAddress: module handle 0x{module_handle:02x}: {module_name}, proc_name_ptr 0x{proc_name_ptr:02x}: {proc_name}")
 
         hook_addr = None
         for addr, name in self.hooks.items():
@@ -190,55 +200,50 @@ class WinApiCalls(object):
             print(f"\x1b[31mPending breakpoint attached for new dynamic import {proc_name} at 0x{hook_addr:02x}\x1b[0m")
             self.breakpoints.add(hook_addr)
             self.pending_breakpoints.remove(proc_name)
-        uc.mem_write(esp + 8, struct.pack("<I", eip))
-        return hook_addr, esp + 8
+        return hook_addr
 
-    def LoadLibraryA(self, uc, esp, log):
+    @api_call("LoadLibraryA", "LoadLibraryW")
+    def LoadLibraryA(self, uc, esp, log, mod_name_ptr):
         # TODO: does not actually load the library
-        eip, mod_name_ptr = struct.unpack("<II", uc.mem_read(esp, 8))
         mod_name = get_string(mod_name_ptr, uc)
-        log and print(f"LoadLibraryA: 0x{eip:02x} mod_name_ptr 0x{mod_name_ptr}: {mod_name}")
-        uc.mem_write(esp + 4, struct.pack("<I", eip))
+        log and print(f"LoadLibraryA: mod_name_ptr 0x{mod_name_ptr}: {mod_name}")
 
         handle = self.base_addr + self.module_handle_offset
         self.module_handle_offset += 1
         self.module_handles[handle] = get_string(mod_name_ptr, uc)
         log and print(f"\tHandle: 0x{handle:02x}")
-        return handle, esp + 4
+        return handle
 
+    @api_call()
     def GetVersion(self, uc, esp, log):
-        eip, = struct.unpack("<I", uc.mem_read(esp, 4))
-        log and print(f"GetVersion: 0x{eip:02x}. Returning 6.1 (Windows 7)")
-        return 0x00000106, esp
+        log and print(f"GetVersion: Returning 6.1 (Windows 7)")
+        return 0x00000106
 
-    def HeapCreate(self, uc, esp, log):
+    @api_call()
+    def HeapCreate(self, uc, esp, log, options, initial_size, max_size):
         # TODO only creates dummy handles, no actual heap creation
-        eip, options, initial_size, max_size = struct.unpack("<IIII", uc.mem_read(esp, 16))
-        uc.mem_write(esp + 12, struct.pack("<I", eip))
-        log and print(f"HeapCreate: 0x{eip:02x}, options 0x{options:02x}, initial size: 0x{initial_size:02x}, max size: 0x{max_size:02x}")
+        log and print(
+            f"HeapCreate: options 0x{options:02x}, initial size: 0x{initial_size:02x}, max size: 0x{max_size:02x}")
         curr_handle = self.next_heap_handle
         self.next_heap_handle += 1
         self.heaps[curr_handle] = (initial_size, max_size)
-        return curr_handle, esp + 12
+        return curr_handle
 
-    def HeapDestroy(self, uc, esp, log):
+    @api_call()
+    def HeapDestroy(self, uc, esp, log, handle):
         # TODO also operates on dummy handles
-        eip, handle = struct.unpack("<II", uc.mem_read(esp, 8))
-        uc.mem_write(esp + 4, struct.pack("<I", eip))
         success = self.heaps.pop(handle, None)
-        return 1 if success else 0, esp + 4
+        return 1 if success else 0
 
-    def MessageBoxA(self, uc, esp, log):
-        eip, owner, text_ptr, title_ptr, type = struct.unpack("<IIIII", uc.mem_read(esp, 20))
-        uc.mem_write(esp + 16, struct.pack("<I", eip))
+    @api_call()
+    def MessageBoxA(self, uc, esp, log, owner, text_ptr, title_ptr, type):
         text = get_string(text_ptr, uc)
         title = get_string(title_ptr, uc)
         print(f"\x1b[31mMessage Box ({title}): {text}\x1b[0m")
-        return 1, esp + 16
+        return 1
 
-    def GetModuleFileNameA(self, uc, esp, log):
-        eip, handle, path_buf, buf_size = struct.unpack("<IIII", uc.mem_read(esp, 16))
-        uc.mem_write(esp + 12, struct.pack("<I", eip))
+    @api_call()
+    def GetModuleFileNameA(self, uc, esp, log, handle, path_buf, buf_size):
         if not handle:
             path = "C:/Users/unipacker/hxp.exe"
         else:
@@ -247,26 +252,23 @@ class WinApiCalls(object):
             except KeyError:
                 module_name = "somefakename.dll"
             path = f"C:/Windows/System32/{module_name}"
-        log and print(f"GetModuleFileNameA: 0x{eip:02x}, handle 0x{handle:02x}. Returning {path} into 0x{path_buf}")
+        log and print(f"GetModuleFileNameA: handle 0x{handle:02x}. Returning {path} into 0x{path_buf}")
         uc.mem_write(path_buf, path.encode())
-        return len(path), esp + 12
+        return len(path)
 
+    @api_call()
     def GetActiveWindow(self, uc, esp, log):
-        eip, = struct.unpack("<I", uc.mem_read(esp, 4))
-        log and print(f"GetActiveWindow: 0x{eip:02x}")
-        return 1, esp
+        log and print(f"GetActiveWindow: Returning 1")
+        return 1
 
-    def GetLastActivePopup(self, uc, esp, log):
-        eip, handle = struct.unpack("<II", uc.mem_read(esp, 8))
-        uc.mem_write(esp + 4, struct.pack("<I", eip))
-        log and print(f"GetLastActivePopup: 0x{eip:02x}, owner handle 0x{handle:02x}")
+    @api_call()
+    def GetLastActivePopup(self, uc, esp, log, handle):
+        log and print(f"GetLastActivePopup: owner handle 0x{handle:02x}")
         return handle, esp + 4
 
-    def InitializeCriticalSection(self, uc, esp, log):
-        eip, section_ptr = struct.unpack("<II", uc.mem_read(esp, 8))
-        uc.mem_write(esp + 4, struct.pack("<I", eip))
-        log and print(f"InitializeCriticalSection: 0x{eip:02x}, pointer 0x{section_ptr:02x}")
-        return None, esp + 4
+    @api_call()
+    def InitializeCriticalSection(self, uc, esp, log, section_ptr):
+        log and print(f"InitializeCriticalSection: pointer 0x{section_ptr:02x}, doing nothing")
 
     def add_hook(self, uc, name, module_name, curr_hook_addr=None):
         hexstr = bytes.fromhex('8b0425') + struct.pack('<I', self.hook_addr) + bytes.fromhex(
