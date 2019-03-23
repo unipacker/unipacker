@@ -212,6 +212,7 @@ class WinApiCalls(object):
             if name == proc_name:
                 hook_addr = addr
                 log and print(f"\tRe-used previously added hook at 0x{hook_addr:02x}")
+                break
         if hook_addr is None:
             hook_addr = self.add_hook(uc, proc_name, module_name)
             log and print(f"\tAdded new hook at 0x{hook_addr:02x}")
@@ -221,7 +222,10 @@ class WinApiCalls(object):
             self.pending_breakpoints.remove(proc_name)
 
         if module_name is not "?":
-            self.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
+            if module_name in self.dllname_to_functionlist:
+                self.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
+            else:
+                self.dllname_to_functionlist[module_name] = [(proc_name, hook_addr)]
 
         return hook_addr
 
