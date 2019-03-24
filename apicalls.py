@@ -174,7 +174,7 @@ class WinApiCalls(object):
                     if address in self.alloc_sizes:
                         size = self.alloc_sizes[address]
                         end_addr = address + size
-                        uc.mem_unmap(address, align(size))
+                        uc.mem_unmap(address, size)
                         new_chunks += remove_range((start, end), (address, end_addr))
                         success = True
                     else:
