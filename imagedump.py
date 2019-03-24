@@ -8,7 +8,7 @@ import sys
 
 from headers import print_dos_header, print_all_headers, hdr_read, PE, pe_write
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
-    IMAGE_SECTION_HEADER
+    IMAGE_SECTION_HEADER, IMAGE_IMPORT_DESCRIPTOR
 from utils import align, alignments, InvalidPEFile, convert_to_string
 
 
@@ -90,9 +90,13 @@ class ImageDump(object):
             print("FAILED here")
             return None  # FAILED
         else:
-            addrlist = dllname_to_ptrs[0][1]
-            addrlist2 = dllname_to_ptrs[1][1]
-            a1, a2 = self.search_offset_two(addrlist, addrlist2, 0x14)
+            for i in range(len(dllname_to_ptrs)-1):
+                addrlist = dllname_to_ptrs[i][1]
+                addrlist2 = dllname_to_ptrs[i+1][1]
+                a1, a2 = self.search_offset_two(addrlist, addrlist2, 0x14)
+                if a1 is not None and a2 is not None:
+                    break
+
             if a1 is None and a2 is None:
                 print(f"FAILED a1: {a1}, a2: {a2}")
                 return None  # FAILED
@@ -123,21 +127,126 @@ class ImageDump(object):
         os.remove(".unipacker_brokenimport.exe")
         return hdr
 
-    def fix_imports_by_rebuilding(self, uc, hdr, total_size, dllname_to_function_list):
-        return hdr
-
-    # TODO Dummy
-    def fix_imports(self, uc, hdr, total_size, dllname_to_functionlist):
-        pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
+    def find_iat(self, uc, base_addr, total_size, iat_array, offset=0x4):
+        print(f"IAT_ARRAY:{iat_array}")
+        pe_write(uc, base_addr, total_size, ".unipacker_brokenimport.exe")
         with open(".unipacker_brokenimport.exe", 'rb') as f:
             b = f.read()
 
-        print(dllname_to_functionlist)
+        # Part 1: Find all possible ptrs
 
-        hdr.data_directories[1].VirtualAddress = 0x60000
-        hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
+        possible_ptrs = []
+        for iat_entry in iat_array:
+            found_ptr = -1
+            possible_addr = []
+            while True:
+                found_ptr = b.find(struct.pack("I", iat_entry), (found_ptr + 1), len(b))
+                if found_ptr == -1:
+                    break
+                else:
+                    possible_addr.append(found_ptr)
 
-        os.remove(".unipacker_brokenimport.exe")
+            possible_ptrs.append(possible_addr)
+
+        # Part 2: Validate with offset
+        ptrs = []
+        for i in range(len(possible_ptrs)-1):
+            l1 = possible_ptrs[i]
+            l2 = possible_ptrs[i+1]
+            a1, a2 = self.search_offset_two(l1, l2, offset)
+            if a1 is None:
+                print("Not Found!")
+            ptrs.append(a1)
+
+        lx = possible_ptrs[-1]
+        for elem in lx:
+            if elem - offset == ptrs[-1]:
+                ptrs.append(elem)
+
+        return ptrs[0]
+
+    def patch_iat(self, uc, base_addr, patches, ptr_to_iat, offset=0x4):
+        for p in patches:
+            uc.mem_write(ptr_to_iat + base_addr, struct.pack("<I", p))
+            ptr_to_iat += offset
+
+    def generate_iat_array(self, dllname_to_function_list, dll_name):
+        iat = []
+        for name, addr in dllname_to_function_list[dll_name]:
+            iat.append(addr)
+        return iat
+
+    def fix_imports_by_rebuilding(self, uc, hdr, virtualmemorysize, total_size, dllname_to_function_list):
+        rva_to_image_import_descriptor = (virtualmemorysize - 0x10000) + 0x2000
+        curr_addr_to_image_import_descriptor = rva_to_image_import_descriptor + hdr.base_addr
+        num_of_image_import_descriptor = len(dllname_to_function_list)
+        size_of_image_import_descriptor = len(bytes(IMAGE_IMPORT_DESCRIPTOR())) * num_of_image_import_descriptor
+
+        rva_of_dll_name = rva_to_image_import_descriptor + size_of_image_import_descriptor + 0x10
+        size_of_dll_name_array = 0
+        for dll_name in dllname_to_function_list.keys():
+            size_of_dll_name_array += len(dll_name) + 1
+
+        rva_of_hint_name = rva_of_dll_name + size_of_dll_name_array + 0x10
+
+        for dll_name in dllname_to_function_list.keys():
+            iat_array = self.generate_iat_array(dllname_to_function_list, dll_name)
+            ptr_iat = self.find_iat(uc, hdr.base_addr, total_size, iat_array)
+
+            if ptr_iat is None:
+                continue
+
+            orva_to_hint_name = rva_of_hint_name
+            dll_name_b = dll_name.encode('ascii') + b'\x00'
+            uc.mem_write(rva_of_dll_name + hdr.base_addr, dll_name_b)
+            size_of_hint_name_array = len(dllname_to_function_list[dll_name]) * 0x4
+            rva_to_image_import_by_name = rva_of_hint_name + size_of_hint_name_array
+            patch_addr = []
+            for fct_name, fct_addr in dllname_to_function_list[dll_name]:
+                import_by_name = b'\x00\x00' + fct_name.encode('ascii') + b'\x00'
+                uc.mem_write(rva_to_image_import_by_name + hdr.base_addr, import_by_name)
+                uc.mem_write(rva_of_hint_name + hdr.base_addr, struct.pack("<I", rva_to_image_import_by_name))
+                patch_addr.append(rva_to_image_import_by_name)
+                rva_to_image_import_by_name += len(import_by_name)
+                rva_of_hint_name += 4
+
+            rva_of_hint_name = rva_to_image_import_by_name
+
+            self.patch_iat(uc, hdr.base_addr, patch_addr, ptr_iat)
+
+            import_struct = IMAGE_IMPORT_DESCRIPTOR(
+                orva_to_hint_name,
+                0,
+                0,
+                rva_of_dll_name,
+                ptr_iat,
+            )
+
+            import_struct_payload = bytes(import_struct)
+
+            uc.mem_write(curr_addr_to_image_import_descriptor, import_struct_payload)
+
+            rva_of_dll_name += len(dll_name_b)
+
+            curr_addr_to_image_import_descriptor += len(bytes(IMAGE_IMPORT_DESCRIPTOR()))
+
+        hdr.data_directories[1].VirtualAddress = rva_to_image_import_descriptor
+        hdr.data_directories[1].Size = size_of_image_import_descriptor
+        hdr.sync(uc)
+        return hdr
+
+    # TODO Dummy
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+        #pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
+        #with open(".unipacker_brokenimport.exe", 'rb') as f:
+        #    b = f.read()
+
+        #print(dllname_to_functionlist)
+
+        #hdr.data_directories[1].VirtualAddress = 0x60000
+        #hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
+
+        #os.remove(".unipacker_brokenimport.exe")
         return hdr
 
 
@@ -244,6 +353,8 @@ class ImageDump(object):
         else:
             total_size = sorted(apicall_handler.allocated_chunks)[-1][1] - base_addr
 
+        print(f"Totalsize:{hex(total_size)}, VirtualMemorySize:{virtualmemorysize}, ach: {apicall_handler.allocated_chunks}")
+
         try:
             hdr = PE(uc, base_addr)
         except InvalidPEFile as i:
@@ -256,7 +367,7 @@ class ImageDump(object):
         hdr.opt_header.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
 
         print("Fixing Imports...")
-        hdr = self.fix_imports(uc, hdr, total_size, dllname_to_functionlist)
+        hdr = self.fix_imports(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
         print("Fixing sections")
         self.fix_sections(hdr, old_number_of_sections, virtualmemorysize)
@@ -273,7 +384,7 @@ class ImageDump(object):
             hdr = self.add_section(hdr, '.nimdata', 0x8000, (virtualmemorysize - 0x10000) + 0x2000)
             print("Appending allocated chunks at the end of the image")
             hdr = self.chunk_to_image_section_hdr(hdr, base_addr, apicall_handler.allocated_chunks)
-
+            # TODO Fix chunk unmapped space with 0
         else:
             virtualmemorysize -= 0x10000
             total_size = virtualmemorysize
@@ -298,9 +409,11 @@ class ImageDump(object):
 
 
 class YZPackDump(ImageDump):
-    def fix_imports(self, uc, hdr, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
         return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
 
 class ASPackDump(ImageDump):
-    def fix_imports(self, uc, hdr, total_size, dllname_to_functionlist):
-        return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+        print(dllname_to_functionlist)
+        #return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+        return hdr

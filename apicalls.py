@@ -48,7 +48,7 @@ class WinApiCalls(object):
         self.module_handle_offset = 0
         self.module_handles = {}
         self.module_for_function = {}
-        self.dynamic_mem_offset = self.base_addr + self.virtualmemorysize + 0x1
+        self.dynamic_mem_offset = self.base_addr + self.virtualmemorysize
         self.allocated_chunks = []
         self.alloc_sizes = {}
         self.pending_breakpoints = set()
@@ -140,7 +140,9 @@ class WinApiCalls(object):
             offset = self.dynamic_mem_offset
             self.dynamic_mem_offset += aligned_size
         new_offset_m = offset % page_size
-        aligned_address = offset - new_offset_m
+        aligned_address = offset  # TODO Remove hacky fix, chunks are not merged
+        if (aligned_address % page_size) != 0:
+            aligned_address = align(offset)
 
         # check if we have mapped parts of it already
         mapped_partial = False
