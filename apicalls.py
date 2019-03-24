@@ -172,7 +172,8 @@ class WinApiCalls(object):
             if start <= address <= end:
                 if free_type & 0x8000 and size == 0:  # MEM_RELEASE, clear whole allocated range
                     if address in self.alloc_sizes:
-                        end_addr = self.alloc_sizes[address]
+                        size = self.alloc_sizes[address]
+                        end_addr = address + size
                         uc.mem_unmap(address, align(size))
                         new_chunks += remove_range((start, end), (address, end_addr))
                         success = True
