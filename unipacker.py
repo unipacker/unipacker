@@ -15,7 +15,7 @@ from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
 from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table, PE, \
-    get_imp
+    get_imp, pe_write
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string, convert_to_string
@@ -226,6 +226,11 @@ Stack space and memory not belonging to the image address space is not dumped.""
             unpacker.dump(mu, apicall_handler, path=args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
+
+    def do_onlydmp(self, args):
+        args = args or "dump"
+        pe_write(mu, BASE_ADDR, virtualmemorysize, args)
+
 
     def do_i(self, args):
         """Get status information
