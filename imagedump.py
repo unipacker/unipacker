@@ -180,12 +180,13 @@ class ImageDump(object):
         return iat
 
     def fix_imports_by_rebuilding(self, uc, hdr, virtualmemorysize, total_size, dllname_to_function_list):
+        print(dllname_to_function_list)
         rva_to_image_import_descriptor = (virtualmemorysize - 0x10000) + 0x2000
         curr_addr_to_image_import_descriptor = rva_to_image_import_descriptor + hdr.base_addr
         num_of_image_import_descriptor = len(dllname_to_function_list)
         size_of_image_import_descriptor = len(bytes(IMAGE_IMPORT_DESCRIPTOR())) * num_of_image_import_descriptor
 
-        rva_of_dll_name = rva_to_image_import_descriptor + size_of_image_import_descriptor + 0x10
+        rva_of_dll_name = rva_to_image_import_descriptor + size_of_image_import_descriptor + 20
         size_of_dll_name_array = 0
         for dll_name in dllname_to_function_list.keys():
             size_of_dll_name_array += len(dll_name) + 1
@@ -234,10 +235,10 @@ class ImageDump(object):
 
             curr_addr_to_image_import_descriptor += len(bytes(IMAGE_IMPORT_DESCRIPTOR()))
 
-        # hdr.data_directories[1].VirtualAddress = rva_to_image_import_descriptor
-        # hdr.data_directories[1].Size = size_of_image_import_descriptor
-        hdr.data_directories[1].VirtualAddress = 0
-        hdr.data_directories[1].Size = 0
+        hdr.data_directories[1].VirtualAddress = rva_to_image_import_descriptor
+        hdr.data_directories[1].Size = size_of_image_import_descriptor
+        # hdr.data_directories[1].VirtualAddress = 0
+        # hdr.data_directories[1].Size = 0
         hdr.sync(uc)
         return hdr
 
