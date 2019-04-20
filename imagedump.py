@@ -208,11 +208,16 @@ class ImageDump(object):
             rva_to_image_import_by_name = rva_of_hint_name + size_of_hint_name_array + 0x10
             patch_addr = []
             for fct_name, fct_addr in dllname_to_function_list[dll_name]:
-                import_by_name = b'\x00\x00' + fct_name.encode('ascii') + b'\x00'
-                uc.mem_write(rva_to_image_import_by_name + hdr.base_addr, import_by_name)
-                uc.mem_write(rva_of_hint_name + hdr.base_addr, struct.pack("<I", rva_to_image_import_by_name))
-                patch_addr.append(rva_to_image_import_by_name)
-                rva_to_image_import_by_name += len(import_by_name)
+                if "/" not in fct_name:  # Import by Name
+                    import_by_name = b'\x00\x00' + fct_name.encode('ascii') + b'\x00'
+                    uc.mem_write(rva_to_image_import_by_name + hdr.base_addr, import_by_name)
+                    uc.mem_write(rva_of_hint_name + hdr.base_addr, struct.pack("<I", rva_to_image_import_by_name))
+                    patch_addr.append(rva_to_image_import_by_name)
+                    rva_to_image_import_by_name += len(import_by_name)
+                else:  # Import by ordinal
+                    ordinal = int(fct_name.split("/")[2], 10) + 0x80000000  # Import Lookup Table 1 bit defines ordinals (0x80000000)
+                    uc.mem_write(rva_of_hint_name + hdr.base_addr, struct.pack("<I", ordinal))
+                    patch_addr.append(ordinal)
                 rva_of_hint_name += 4
 
             rva_of_hint_name = rva_to_image_import_by_name + 0x8
@@ -226,6 +231,9 @@ class ImageDump(object):
                 rva_of_dll_name,
                 ptr_iat,
             )
+
+            print(f"patch_addr: {patch_addr}")
+            print(f"ptr_iat: {ptr_iat}")
 
             import_struct_payload = bytes(import_struct)
 
