@@ -430,11 +430,12 @@ class ImageDump(object):
         print(f"Dumping state to {path}")
         pe_write(uc, base_addr, total_size, path)
 
-
+# YZPackDump can use fix_imports_by_rebuilding as well
 class YZPackDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
-        #return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+        return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
+        # return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
 
 class ASPackDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):

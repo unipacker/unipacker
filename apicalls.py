@@ -200,7 +200,6 @@ class WinApiCalls(object):
         log and print("\tAddress range not allocated!")
         return 0
 
-    # TODO Add support for Import by ordinals
     @api_call()
     def GetProcAddress(self, uc, esp, log, module_handle, proc_name_ptr):
         try:
