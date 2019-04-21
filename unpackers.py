@@ -3,7 +3,7 @@ import sys
 import r2pipe
 import yara
 
-from imagedump import ImageDump, YZPackDump, ASPackDump
+from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump
 
 
 class DefaultUnpacker(object):
@@ -151,6 +151,7 @@ class FSGUnpacker(DefaultUnpacker):
         r2 = r2pipe.open(sample)
         secs = r2.cmdj("iSj")
         self.allowed_sections = []
+        self.dumper = FSGDump()
         for s in secs:
             if "size" in s and s["size"] > 0:
                 self.allowed_sections += [s["name"]]

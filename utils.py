@@ -94,6 +94,17 @@ def calc_export_offset_of_dll(dllpath, function_name):
             return e.address
     return None
 
+def print_dllname_to_functionlist(dllname_to_functionlist):
+    for dll in dllname_to_functionlist:
+        print(dll)
+        for fct_name, fct_addr in dllname_to_functionlist[dll]:
+            print(f"\t{fct_name}, {hex(fct_addr)}")
+
+def print_addr_list(list_name, list):
+    hex = list_name
+    hex += ', '.join('0x%02x' % l for l in list)
+    print(hex)
+
 
 class ImportValues(object):
     def __init__(self, import_struct, name, imports):
