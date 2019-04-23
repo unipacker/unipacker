@@ -5,7 +5,7 @@ import collections
 import pefile
 from unicorn.x86_const import UC_X86_REG_EAX
 
-from utils import align, merge, remove_range, print_cols, get_string
+from utils import align, merge, remove_range, print_cols, get_string, print_dllname_to_functionlist
 
 apicall_mapping = {}
 
@@ -59,6 +59,7 @@ class WinApiCalls(object):
         self.atn = atn
         self.ntp = ntp
         self.dllname_to_functionlist = collections.OrderedDict()
+        self.load_library_counter = {}  # DllName -> Number of Loads
 
     def apicall(self, address, name, uc, esp, log):
         try:
@@ -200,6 +201,7 @@ class WinApiCalls(object):
         log and print("\tAddress range not allocated!")
         return 0
 
+    # TODO Add ordinals for implemented functions
     @api_call()
     def GetProcAddress(self, uc, esp, log, module_handle, proc_name_ptr):
         try:
@@ -231,6 +233,8 @@ class WinApiCalls(object):
             self.pending_breakpoints.remove(proc_name)
 
         if module_name is not "?":
+            counter = self.load_library_counter[module_name]
+            module_name += "#" + str(counter)
             if module_name in self.dllname_to_functionlist:
                 self.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
             else:
@@ -247,8 +251,19 @@ class WinApiCalls(object):
         handle = self.base_addr + self.module_handle_offset
         self.module_handle_offset += 1
         self.module_handles[handle] = get_string(mod_name_ptr, uc)
+        if mod_name not in self.load_library_counter:
+            self.load_library_counter[mod_name] = 0
+            mod_name += "#0"
+            self.dllname_to_functionlist[mod_name] = []
+        else:
+            self.load_library_counter[mod_name] += 1
+            counter = self.load_library_counter[mod_name]
+            mod_name += "#" + str(counter)
+            self.dllname_to_functionlist[mod_name] = []
 
-        self.dllname_to_functionlist[mod_name] = []
+        #print(f"LoadLibrary: {mod_name}")
+        #print_dllname_to_functionlist(self.dllname_to_functionlist)
+
 
         log and print(f"\tHandle: 0x{handle:02x}")
         return handle

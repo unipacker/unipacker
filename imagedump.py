@@ -192,7 +192,7 @@ class ImageDump(object):
         rva_of_dll_name = rva_to_image_import_descriptor + size_of_image_import_descriptor + 20
         size_of_dll_name_array = 0
         for dll_name in dllname_to_function_list.keys():
-            size_of_dll_name_array += len(dll_name) + 1
+            size_of_dll_name_array += len(dll_name.split('#')[0]) + 1
 
         rva_of_hint_name = rva_of_dll_name + size_of_dll_name_array + 0x10
 
@@ -205,7 +205,7 @@ class ImageDump(object):
                 continue
 
             orva_to_hint_name = rva_of_hint_name
-            dll_name_b = dll_name.encode('ascii') + b'\x00'
+            dll_name_b = dll_name.split('#')[0].encode('ascii') + b'\x00'
             print(f"writing dllname {dll_name} to: {hex(rva_of_dll_name)}")
             uc.mem_write(rva_of_dll_name + hdr.base_addr, dll_name_b)
             size_of_hint_name_array = len(dllname_to_function_list[dll_name]) * 0x4
@@ -449,5 +449,5 @@ class ASPackDump(ImageDump):
 class FSGDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
         print_dllname_to_functionlist(dllname_to_functionlist)
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+        #return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
         #return hdr
