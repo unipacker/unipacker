@@ -74,6 +74,7 @@ class ImageDump(object):
 
     # Fix imports by DLL Name
     # TODO give options to user if other (valid) addresses are found
+    # TODO implement multiple LoadLibrary of same dll
     def fix_imports_by_dllname(self, uc, hdr, total_size, dllname_to_functionlist):
         pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
         with open(".unipacker_brokenimport.exe", 'rb') as f:
@@ -183,6 +184,7 @@ class ImageDump(object):
         return iat
 
     # TODO Add original imports
+    # TODO Fix IAT Finding algorithm -> full imports must be available
     def fix_imports_by_rebuilding(self, uc, hdr, virtualmemorysize, total_size, dllname_to_function_list):
         rva_to_image_import_descriptor = (virtualmemorysize - 0x10000) + 0x2000
         curr_addr_to_image_import_descriptor = rva_to_image_import_descriptor + hdr.base_addr
@@ -356,7 +358,7 @@ class ImageDump(object):
             self.fix_section(curr_section, next_section.VirtualAddress)
 
         # handle last section differently: we have no next section's virtual address. Thus we take the end of the image
-        self.fix_section(hdr.section_list[old_number_of_sections - 1], virtualmemorysize) # TODO set again to -0x10000
+        self.fix_section(hdr.section_list[old_number_of_sections - 1], virtualmemorysize)  # TODO set again to -0x10000
 
     def fix_checksum(self, uc, hdr, base_addr, total_size):
         loaded_img = uc.mem_read(base_addr, total_size)
@@ -437,8 +439,8 @@ class ImageDump(object):
 # YZPackDump can use fix_imports_by_rebuilding as well
 class YZPackDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
-        return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
-        # return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+        # return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
+        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
 class ASPackDump(ImageDump):
@@ -448,6 +450,4 @@ class ASPackDump(ImageDump):
 
 class FSGDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
-        print_dllname_to_functionlist(dllname_to_functionlist)
-        #return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
-        #return hdr
+        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)

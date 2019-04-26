@@ -114,6 +114,17 @@ class WinApiCalls(object):
         handle = self.base_addr + self.module_handle_offset
         self.module_handle_offset += 1
         self.module_handles[handle] = get_string(module_name_ptr, uc)
+
+        if module_name not in self.load_library_counter:
+            self.load_library_counter[module_name] = 0
+            module_name += "#0"
+            self.dllname_to_functionlist[module_name] = []
+        else:
+            self.load_library_counter[module_name] += 1
+            counter = self.load_library_counter[module_name]
+            module_name += "#" + str(counter)
+            self.dllname_to_functionlist[module_name] = []
+
         return handle
 
     # TODO Apply protections to alloc chunks
@@ -233,12 +244,15 @@ class WinApiCalls(object):
             self.pending_breakpoints.remove(proc_name)
 
         if module_name is not "?":
-            counter = self.load_library_counter[module_name]
-            module_name += "#" + str(counter)
-            if module_name in self.dllname_to_functionlist:
-                self.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
-            else:
-                self.dllname_to_functionlist[module_name] = [(proc_name, hook_addr)]
+            try:
+                counter = self.load_library_counter[module_name]
+                module_name += "#" + str(counter)
+                if module_name in self.dllname_to_functionlist:
+                    self.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
+                else:
+                    self.dllname_to_functionlist[module_name] = [(proc_name, hook_addr)]
+            except KeyError:
+                print(f"Error: Accessing method of not registered Library")
 
         return hook_addr
 
