@@ -113,3 +113,10 @@ class _IMAGE_DOS_HEADER(Structure):
         ("e_res2", c_char*20),
         ("e_lfanew", c_uint32),
     ]
+
+class _FILETIME(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("dwLowDateTime", c_uint32),
+        ("dwHighDateTime", c_uint32),
+    ]

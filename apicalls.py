@@ -1,11 +1,15 @@
 import struct
 from inspect import signature
-
+from ctypes import *
 import collections
 import pefile
 from unicorn.x86_const import UC_X86_REG_EAX
 
 from utils import align, merge, remove_range, print_cols, get_string, print_dllname_to_functionlist
+
+import time
+from pe_structs import _FILETIME
+
 
 apicall_mapping = {}
 
@@ -343,6 +347,22 @@ class WinApiCalls(object):
     def GetLastActivePopup(self, uc, esp, log, handle):
         log and print(f"GetLastActivePopup: owner handle 0x{handle:02x}")
         return handle, esp + 4
+
+    @api_call()
+    def GetSystemTimeAsFileTime(self, uc, esp, log, filetime_ptr):
+        t = (int(
+            time.time()) * 10000000) + 116444736000000000  # https://support.microsoft.com/en-us/help/167296/how-to-convert-a-unix-time-t-to-a-win32-filetime-or-systemtime
+        dwLowDateTime = c_uint32(t).value
+        dwHighDateTime = t >> 32
+
+        filetime = _FILETIME(
+            dwLowDateTime,
+            dwHighDateTime,
+        )
+        log and print(
+            f"GetSystemTimeAsFileTime at 0x{filetime_ptr:02x}: dwLowDateTime 0x{dwLowDateTime:02x}, dwHighDateTime 0x{dwHighDateTime:02x}")
+        filetime_payload = bytes(filetime)
+        uc.mem_write(filetime_ptr, filetime_payload)
 
     @api_call()
     def InitializeCriticalSection(self, uc, esp, log, section_ptr):
