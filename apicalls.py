@@ -215,6 +215,12 @@ class WinApiCalls(object):
     # TODO Add ordinals for implemented functions
     @api_call()
     def GetProcAddress(self, uc, esp, log, module_handle, proc_name_ptr):
+        if module_handle == 0:
+            log and print(f"GetProcAddress: invalid module_handle: 0x{module_handle:02x}")
+            return 0x0
+        if proc_name_ptr == 0:
+            log and print(f"GetProcAddress: invalid proc_name_ptr: 0x{proc_name_ptr:02x}")
+            return 0x0
         try:
             module_name = self.module_handles[module_handle]
         except KeyError:
@@ -226,9 +232,13 @@ class WinApiCalls(object):
         else:
             proc_name = get_string(proc_name_ptr, uc)
 
+        if proc_name == "":
+            log and print(f"GetProcAddress: invalid proc_name")
+            return 0x0
+
         log and print(
             f"GetProcAddress: module handle 0x{module_handle:02x}: {module_name}, proc_name_ptr 0x{proc_name_ptr:02x}: {proc_name}")
-
+        # TODO Fix print for ordinals
         hook_addr = None
         for addr, name in self.hooks.items():
             if name == proc_name:
