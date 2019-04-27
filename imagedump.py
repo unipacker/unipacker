@@ -451,3 +451,7 @@ class ASPackDump(ImageDump):
 class FSGDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
+class MEWDump(ImageDump):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)

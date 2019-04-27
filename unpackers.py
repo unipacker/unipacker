@@ -3,7 +3,7 @@ import sys
 import r2pipe
 import yara
 
-from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump
+from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump
 
 
 class DefaultUnpacker(object):
@@ -177,6 +177,19 @@ class YZPackUnpacker(DefaultUnpacker):
         return sys.maxsize, None
 
 
+class MEWUnpacker(DefaultUnpacker):
+    def __init__(self, sample):
+        super().__init__(sample)
+        self.allowed_sections = []
+        self.dumper = MEWDump()
+
+    def get_entrypoint(self):
+        return None
+
+    def get_tail_jump(self):
+        return sys.maxsize, None
+
+
 def identifypacker(sample, yar):
     rules = yara.compile(filepath=yar)
     matches = rules.match(sample)
@@ -218,6 +231,7 @@ def get_unpacker(sample):
         "aspack": ASPackUnpacker,
         "fsg": FSGUnpacker,
         "yzpack": YZPackUnpacker,
+        "mew": MEWUnpacker,
     }
 
     if "pe32" not in str(yara_matches):
