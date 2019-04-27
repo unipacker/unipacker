@@ -56,8 +56,13 @@ def remove_range(old_range, to_remove):
     # range unaffected
     return [(old_lower, old_upper)]
 
+
 def convert_to_string(b):
-    return b.rstrip(b'\x00').decode('ascii')
+    try:
+        return b.rstrip(b'\x00').decode('ascii')
+    except UnicodeDecodeError:
+        return str(hex(int.from_bytes(b, "little")))
+
 
 def get_string2(ptr, uc):
     printable_chars = bytes(string.printable, 'ascii')
