@@ -3,9 +3,11 @@ from inspect import signature
 from ctypes import *
 import collections
 import pefile
+import time
 from unicorn.x86_const import UC_X86_REG_EAX
-
-from utils import align, merge, remove_range, print_cols, get_string, print_dllname_to_functionlist
+import random
+from utils import align, merge, remove_range, print_cols, get_string, print_dllname_to_functionlist, calc_processid, \
+    calc_threadid
 
 import time
 from pe_structs import _FILETIME
@@ -64,6 +66,8 @@ class WinApiCalls(object):
         self.ntp = ntp
         self.dllname_to_functionlist = collections.OrderedDict()
         self.load_library_counter = {}  # DllName -> Number of Loads
+        self.processid = calc_processid()
+        self.threadid = calc_threadid()
 
     def apicall(self, address, name, uc, esp, log):
         try:
@@ -363,6 +367,37 @@ class WinApiCalls(object):
             f"GetSystemTimeAsFileTime at 0x{filetime_ptr:02x}: dwLowDateTime 0x{dwLowDateTime:02x}, dwHighDateTime 0x{dwHighDateTime:02x}")
         filetime_payload = bytes(filetime)
         uc.mem_write(filetime_ptr, filetime_payload)
+
+    @api_call()
+    def GetCurrentThreadId(self, uc, esp, log):
+        log and print(f"GetCurrentThreadId: 0x{self.threadid:02x}")
+        return self.threadid
+
+    @api_call()
+    def GetCurrentProcessId(self, uc, esp, log):
+        log and print(f"GetCurrentProcessId: 0x{self.processid:02x}")
+        return self.processid
+
+    @api_call()
+    def QueryPerformanceCounter(self, uc, esp, log, ptr):
+        ticks = time.perf_counter() * (10**9)
+        uc.mem_write(ptr, struct.pack("<Q", ticks))
+        log and print(f"QueryPerformanceCounter: {ticks} ticks")
+
+    # TODO Complete with all features
+    @api_call()
+    def IsProcessorFeaturePresent(self, uc, esp, log, feature):
+        features = {0xA: 1}
+        feature_description = {0xA: "PF_XMMI64_INSTRUCTIONS_AVAILABLE: The SSE2 instruction set is available."}
+        if feature in features:
+            if features[feature] == 1:
+                log and print(f"IsProcessorFeaturePresent: {feature_description[feature]} ({feature}) is present")
+            else:
+                log and print(f"IsProcessorFeaturePresent: {feature_description[feature]} ({feature} is not present")
+            return features[feature]
+        log and print(f"IsProcessorFeaturePresent: Feature {feature} is unknown. Knwon features: {feature_description}")
+        return 0
+
 
     @api_call()
     def InitializeCriticalSection(self, uc, esp, log, section_ptr):
