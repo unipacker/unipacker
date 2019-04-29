@@ -556,11 +556,16 @@ def try_parse_address(addr):
 def getVirtualMemorySize(sample):
     r2 = r2pipe.open(sample)
     sections = r2.cmdj("iSj")
+    min_offset = sys.maxsize
     total_size = 0
     for sec in sections:
+        if sec['vaddr'] < min_offset:
+            min_offset = sec['vaddr']
         if 'vsize' in sec:
             total_size += sec['vsize']
     r2.quit()
+    total_size += (min_offset - BASE_ADDR)
+    print(f"Virtualmemorysize: {hex(total_size)}")
 
     return total_size
 
@@ -900,10 +905,10 @@ def load_dll(mu, path_dll, start_addr):
 def init_uc():
     global virtualmemorysize, BASE_ADDR, STACK_ADDR, STACK_SIZE, STACK_START, HOOK_ADDR, mu, startaddr, loaded, apicall_handler
     # Calculate required memory
-    virtualmemorysize = getVirtualMemorySize(sample)
     pe = pefile.PE(sample)
     BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
     unpacker.BASE_ADDR = BASE_ADDR
+    virtualmemorysize = getVirtualMemorySize(sample)
     STACK_ADDR = 0x0
     STACK_SIZE = 1024 * 1024
     STACK_START = STACK_ADDR + STACK_SIZE
@@ -915,7 +920,7 @@ def init_uc():
     if startaddr is None:
         startaddr = entrypoint(pe)
     loaded = pe.get_memory_mapped_image(ImageBase=BASE_ADDR)
-    virtualmemorysize = align(len(loaded) + 0x10000, page_size=4096)  # Space possible IAT rebuilding
+    virtualmemorysize = align(virtualmemorysize + 0x10000, page_size=4096)  # Space possible IAT rebuilding
     unpacker.virtualmemorysize = virtualmemorysize
     mu.mem_map(BASE_ADDR, virtualmemorysize)
     mu.mem_write(BASE_ADDR, loaded)
