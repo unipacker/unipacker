@@ -1,6 +1,7 @@
 import struct
 import pefile
 import string
+import random
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -109,6 +110,21 @@ def print_addr_list(list_name, list):
     hex = list_name
     hex += ', '.join('0x%02x' % l for l in list)
     print(hex)
+
+def calc_processid():
+    x = random.randint(2000, 6000)
+    while x % 4 != 0:
+        x = random.randint(2000, 6000)
+
+    return x
+
+
+def calc_threadid():
+    x = random.randint(0x500, 0x2000)
+    while x % 4 != 0:
+        x = random.randint(0x500, 0x2000)
+
+    return x
 
 
 class ImportValues(object):
