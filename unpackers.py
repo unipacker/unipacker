@@ -176,12 +176,16 @@ class YZPackUnpacker(DefaultUnpacker):
     def get_tail_jump(self):
         return sys.maxsize, None
 
-
+# TODO Not Allowed addr ranges -> Blacklist
 class MEWUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = []
         self.dumper = MEWDump()
+
+    def get_allowed_addr_ranges(self):
+        return [(0x400000, 0x400FFF), (0x418000, 0x42F000)]  # TODO For all samples -> custom reader -> remove r2
+
 
     def get_entrypoint(self):
         return None

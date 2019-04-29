@@ -15,7 +15,8 @@ from utils import align, alignments, InvalidPEFile, convert_to_string, print_dll
 class ImageDump(object):
 
     def fix_section(self, section, next_section_vaddr):
-        sec_name = section.Name.decode().strip("\x00")
+        #sec_name = section.Name.decode().strip("\x00")
+        sec_name = convert_to_string(section.Name)
         print(f"Size of raw data ({sec_name}): 0x{section.SizeOfRawData:02x}, "
               f"fixed: 0x{next_section_vaddr - section.VirtualAddress:02x}")
         section.SizeOfRawData = next_section_vaddr - section.VirtualAddress
