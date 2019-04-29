@@ -20,44 +20,77 @@ from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string, convert_to_string
 
-imports = set()
-mu = None
-counter = 0
-virtualmemorysize = 0
-BASE_ADDR = 0
-HOOK_ADDR = 0
-section_hopping_control = True
-write_execute_control = False
 
-breakpoints = set()
-mem_breakpoints = []
-data_lock = threading.Lock()
-instruction_lock = threading.Lock()
-emulator_event = threading.Event()
-shell_event = threading.Event()
-single_instruction = False
+state = None
 
-log_mem_read = False
-log_mem_write = False
-log_instr = False
-log_syscalls = False
 
-sections_read = {}
-sections_written = {}
-write_targets = []
-sections_executed = {}
-api_calls = {}
+class State(object):
 
-start = 0
+    def __init__(self, sync):
+        self.imports = set()
+        self.uc = None
+        self.sample = None
+        self.unpacker = None
+        self.yara_matches = None
+        self.virtualmemorysize = 0
+        self.loaded_image = 0  # TODO rename to loaded_image
+        self.BASE_ADDR = 0
+        self.HOOK_ADDR = 0
+        self.STACK_ADDR = 0
+        self.STACK_SIZE = 0
+        self.PEB_BASE = 0
+        self.TEB_BASE = 0
+
+        self.section_hopping_control = True
+        self.write_execute_control = False
+        self.allowed_addr_ranges = []
+
+        self.breakpoints = set()
+        self.mem_breakpoints = []
+        self.data_lock = threading.Lock()
+        self.instruction_lock = threading.Lock()  # TODO unused, do we need this?
+        self.single_instruction = False
+        self.apicall_handler = None
+        self.startaddr = 0
+        self.endaddr = 0
+
+        self.log_mem_read = False
+        self.log_mem_write = False
+        self.log_instr = False
+        self.log_apicalls = False
+
+        self.sections_read = {}
+        self.sections_written = {}
+        self.write_targets = []
+        self.sections_executed = {}
+        self.api_calls = {}  # TODO rename to apicall_counter
+
+        self.start = 0
+        self.sync = sync
+
+
+class Sync(object):
+
+    def __init__(self):
+        self.emulator_event = threading.Event()
+        self.client_event = threading.Event()
+
+    def switch(self, is_client):
+        if is_client:
+            self.client_event.clear()
+            self.emulator_event.set()
+            self.client_event.wait()
+        else:
+            self.emulator_event.clear()
+            self.client_event.set()
+            self.emulator_event.wait()
 
 
 class Shell(Cmd):
 
     @staticmethod
     def continue_emu():
-        shell_event.clear()
-        emulator_event.set()
-        shell_event.wait()
+        state.sync.switch(False)
 
     def __init__(self):
         super().__init__()
@@ -69,20 +102,20 @@ class Shell(Cmd):
         """Analyze absolutely all: Show a collection of stats about the current sample"""
         print("\x1b[31mFile analysis:\x1b[0m")
         print_cols([
-            ("YARA:", ", ".join(map(str, yara_matches))),
-            ("Chosen unpacker:", unpacker.__class__.__name__),
-            ("Allowed sections:", ', '.join(unpacker.allowed_sections)),
-            ("End of unpacking stub:", f"0x{endaddr:02x}" if endaddr != sys.maxsize else "unknown"),
-            ("Section hopping detection:", "active" if section_hopping_control else "inactive"),
-            ("Write+Exec detection:", "active" if write_execute_control else "inactive")
+            ("YARA:", ", ".join(map(str, state.yara_matches))),
+            ("Chosen unpacker:", state.unpacker.__class__.__name__),
+            ("Allowed sections:", ', '.join(state.unpacker.allowed_sections)),
+            ("End of unpacking stub:", f"0x{state.endaddr:02x}" if state.endaddr != sys.maxsize else "unknown"),
+            ("Section hopping detection:", "active" if state.section_hopping_control else "inactive"),
+            ("Write+Exec detection:", "active" if state.write_execute_control else "inactive")
         ])
         print("\n\x1b[31mPE stats:\x1b[0m")
         print_cols([
-            ("Declared virtual memory size:", f"0x{virtualmemorysize:02x}", "", ""),
-            ("Actual loaded image size:", f"0x{len(loaded):02x}", "", ""),
-            ("Image base address:", f"0x{BASE_ADDR:02x}", "", ""),
-            ("Mapped stack space:", f"0x{STACK_ADDR:02x}", "-", f"0x{STACK_ADDR + STACK_SIZE:02x}"),
-            ("Mapped hook space:", f"0x{HOOK_ADDR:02x}", "-", f"0x{HOOK_ADDR + 0x1000:02x}")
+            ("Declared virtual memory size:", f"0x{state.virtualmemorysize:02x}", "", ""),
+            ("Actual loaded image size:", f"0x{len(state.loaded_image):02x}", "", ""),
+            ("Image base address:", f"0x{state.BASE_ADDR:02x}", "", ""),
+            ("Mapped stack space:", f"0x{state.STACK_ADDR:02x}", "-", f"0x{state.STACK_ADDR + state.STACK_SIZE:02x}"),
+            ("Mapped hook space:", f"0x{state.HOOK_ADDR:02x}", "-", f"0x{state.HOOK_ADDR + 0x1000:02x}")
         ])
         self.do_i("i")
         print("\n\x1b[31mRegister status:\x1b[0m")
@@ -93,7 +126,7 @@ class Shell(Cmd):
 boring static information. 'Auto-aaa' lets you get your hands dirty with emulation after
 a quick glance at sample infos, without having to type 'r' yourself"""
         self.do_aaa(args)
-        if any([log_instr, log_mem_read, log_mem_write]):
+        if any([state.log_instr, state.log_mem_read, state.log_mem_write]):
             sleep(2)
         self.do_r(args)
 
@@ -128,7 +161,7 @@ Show current breakpoints:   b"""
             if not arg:
                 continue
             if arg == "stack":
-                mem_targets += [(STACK_ADDR, STACK_ADDR + STACK_SIZE)]
+                mem_targets += [(state.STACK_ADDR, state.STACK_ADDR + state.STACK_SIZE)]
             elif "m" == arg[0]:
                 try:
                     parts = list(map(lambda p: int(p, 0), arg[1:].split("-")))
@@ -142,43 +175,41 @@ Show current breakpoints:   b"""
                     print(f"Error parsing address or range {arg}")
             elif "$" == arg[0]:
                 arg = arg[1:]
-                if arg in apicall_handler.hooks.values():
-                    for addr, func_name in apicall_handler.hooks.items():
+                if arg in state.apicall_handler.hooks.values():
+                    for addr, func_name in state.apicall_handler.hooks.items():
                         if arg == func_name:
                             code_targets += [addr]
                             break
                 else:
-                    apicall_handler.register_pending_breakpoint(arg)
+                    state.apicall_handler.register_pending_breakpoint(arg)
             else:
                 try:
                     code_targets += [int(arg, 0)]
                 except ValueError:
                     print(f"Error parsing address {arg}")
-        with data_lock:
-            breakpoints.update(code_targets)
-            global mem_breakpoints
-            mem_breakpoints = list(merge(mem_breakpoints + mem_targets))
+        with state.data_lock:
+            state.breakpoints.update(code_targets)
+            state.mem_breakpoints = list(merge(state.mem_breakpoints + mem_targets))
             self.print_breakpoints()
 
     def print_breakpoints(self):
-        current_breakpoints = list(map(try_parse_address, breakpoints))
-        current_breakpoints += list(map(lambda b: f'{b} (pending)', apicall_handler.pending_breakpoints))
+        current_breakpoints = list(map(try_parse_address, state.breakpoints))
+        current_breakpoints += list(map(lambda b: f'{b} (pending)', state.apicall_handler.pending_breakpoints))
         print(f"Current breakpoints: {current_breakpoints}")
         current_mem_breakpoints = []
-        for lower, upper in mem_breakpoints:
-            if lower == STACK_ADDR and upper == STACK_ADDR + STACK_SIZE:
+        for lower, upper in state.mem_breakpoints:
+            if lower == state.STACK_ADDR and upper == state.STACK_ADDR + state.STACK_SIZE:
                 current_mem_breakpoints += ["complete stack"]
             else:
-                stack = lower >= STACK_ADDR and upper <= STACK_ADDR + STACK_SIZE
+                stack = lower >= state.STACK_ADDR and upper <= state.STACK_ADDR + state.STACK_SIZE
                 text = f"0x{lower:02x}" + (f" - 0x{upper:02x}" if upper != lower else "")
                 current_mem_breakpoints += [text + (" (stack)" if stack else "")]
         print(f"Current mem breakpoints: {current_mem_breakpoints}")
 
     def do_c(self, args):
         """Continue emulation. If it hasn't been started yet, it will act the same as 'r'"""
-        with data_lock:
-            global single_instruction
-            single_instruction = False
+        with state.data_lock:
+            state.single_instruction = False
         if self.emu_started:
             self.continue_emu()
         else:
@@ -205,7 +236,7 @@ Show current breakpoints:   b"""
 
         for x in args_list:
             if x in mapping.keys():
-                mapping[x](mu, BASE_ADDR)
+                mapping[x](state.uc, state.BASE_ADDR)
 
 
     def do_dump(self, args):
@@ -223,13 +254,13 @@ data at the right offsets.
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
             args = args or "unpacked.exe"
-            unpacker.dump(mu, apicall_handler, path=args)
+            state.unpacker.dump(state.uc, state.apicall_handler, path=args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
 
     def do_onlydmp(self, args):
         args = args or "dump"
-        pe_write(mu, BASE_ADDR, virtualmemorysize, args)
+        pe_write(state.uc, state.BASE_ADDR, state.virtualmemorysize, args)
 
 
     def do_i(self, args):
@@ -280,7 +311,7 @@ Location:   address (decimal or hexadecimal form) or a $-prefixed register name 
                 alias = ""
                 addr = int(addr, 0)
 
-            print_mem(mu, addr, n, t, alias)
+            print_mem(state.uc, addr, n, t, alias)
         except Exception as e:
             print(f"Error parsing command: {e}")
 
@@ -320,7 +351,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
                     value *= old_value
                 elif op == "/=":
                     value = old_value // value
-                mu.reg_write(regs[reg], value)
+                state.uc.reg_write(regs[reg], value)
             except Exception as e:
                 print(f"Error: {e}")
             return
@@ -343,7 +374,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
 
                 if fmt:
                     value = int(value, 0)
-                    old_value, = struct.unpack(fmt, mu.mem_read(addr, size))
+                    old_value, = struct.unpack(fmt, state.uc.mem_read(addr, size))
                     if op == "+=":
                         value += old_value
                     elif op == "-=":
@@ -355,7 +386,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
                     to_write = struct.pack(fmt, value)
                 else:
                     to_write = (value + "\x00").encode()
-                mu.mem_write(addr, to_write)
+                state.uc.mem_write(addr, to_write)
             except Exception as e:
                 print(f"Error: {e}")
 
@@ -366,10 +397,8 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
             self.do_c(args)
             return
         self.emu_started = True
-        shell_event.clear()
-        emulator_event.set()
         threading.Thread(target=emu).start()
-        shell_event.wait()
+        state.sync.switch(True)
 
     def do_detect(self, args):
         """Stop emulation if certain states are detected.
@@ -383,37 +412,32 @@ Options:
     wx, write_exec  Stop emulation when an instruction would be executed that has been modified before. Note that if the
                     unpacking stub is self-modifying, this detection will raise some false-positives instead of finding
                     the unpacked code."""
-        global section_hopping_control, write_execute_control
-        section_hopping_control = any(x in args for x in ["h", "hop"])
-        print(f"[{'x' if section_hopping_control else ' '}] section hopping detection")
-        write_execute_control = any(x in args for x in ["wx", "write_exec"])
-        print(f"[{'x' if write_execute_control else ' '}] Write+Exec detection")
+        state.section_hopping_control = any(x in args for x in ["h", "hop"])
+        print(f"[{'x' if state.section_hopping_control else ' '}] section hopping detection")
+        state.write_execute_control = any(x in args for x in ["wx", "write_exec"])
+        print(f"[{'x' if state.write_execute_control else ' '}] Write+Exec detection")
 
     def do_rst(self, args):
         """Close the current sample and start at the initial file choosing prompt again."""
         if self.emu_started:
-            mu.emu_stop()
-            shell_event.clear()
-            emulator_event.set()
-            shell_event.wait()
+            state.uc.emu_stop()
+            state.sync.switch(True)
         print("")
         init_sample(False)
         init_uc()
         self.emu_started = False
-        global single_instruction, sections_read, sections_written, sections_executed, write_targets, api_calls
-        sections_read = {}
-        sections_written = {}
-        write_targets = []
-        sections_executed = {}
-        api_calls = {}
-        single_instruction = False
-        self.update_prompt(startaddr)
+        state.sections_read = {}
+        state.sections_written = {}
+        state.write_targets = []
+        state.sections_executed = {}
+        state.api_calls = {}
+        state.single_instruction = False
+        self.update_prompt(state.startaddr)
 
     def do_s(self, args):
         """Execute a single instruction and return to the shell"""
-        with data_lock:
-            global single_instruction
-            single_instruction = True
+        with state.data_lock:
+            state.single_instruction = True
         if self.emu_started:
             self.continue_emu()
         else:
@@ -425,16 +449,15 @@ Options:
 deleted this time."""
         code_targets = []
         mem_targets = []
-        global mem_breakpoints
         if not args:
-            breakpoints.clear()
-            mem_breakpoints.clear()
-            apicall_handler.pending_breakpoints.clear()
+            state.breakpoints.clear()
+            state.mem_breakpoints.clear()
+            state.apicall_handler.pending_breakpoints.clear()
         for arg in args.split(" "):
             if not arg:
                 continue
             if arg == "stack":
-                mem_targets += [(STACK_ADDR, STACK_ADDR + STACK_SIZE)]
+                mem_targets += [(state.STACK_ADDR, state.STACK_ADDR + state.STACK_SIZE)]
             elif "m" == arg[0]:
                 try:
                     parts = list(map(lambda p: int(p, 0), arg[1:].split("-")))
@@ -448,13 +471,13 @@ deleted this time."""
                     print(f"Error parsing address or range {arg}")
             elif "$" == arg[0]:
                 arg = arg[1:]
-                if arg in apicall_handler.hooks.values():
-                    for addr, func_name in apicall_handler.hooks.items():
+                if arg in state.apicall_handler.hooks.values():
+                    for addr, func_name in state.apicall_handler.hooks.items():
                         if arg == func_name:
                             code_targets += [addr]
                             break
-                elif arg in apicall_handler.pending_breakpoints:
-                    apicall_handler.pending_breakpoints.remove(arg)
+                elif arg in state.apicall_handler.pending_breakpoints:
+                    state.apicall_handler.pending_breakpoints.remove(arg)
                 else:
                     print(f"Unknown method {arg}, not imported or used in pending breakpoint")
             else:
@@ -462,17 +485,17 @@ deleted this time."""
                     code_targets += [int(arg, 0)]
                 except ValueError:
                     print(f"Error parsing address {arg}")
-        with data_lock:
+        with state.data_lock:
             for t in code_targets:
                 try:
-                    breakpoints.remove(t)
+                    state.breakpoints.remove(t)
                 except KeyError:
                     pass
             new_mem_breakpoints = []
-            for b_lower, b_upper in mem_breakpoints:
+            for b_lower, b_upper in state.mem_breakpoints:
                 for t_lower, t_upper in mem_targets:
                     new_mem_breakpoints += remove_range((b_lower, b_upper), (t_lower, t_upper))
-            mem_breakpoints = list(merge(new_mem_breakpoints))
+            state.mem_breakpoints = list(merge(new_mem_breakpoints))
             self.print_breakpoints()
 
     def do_log(self, args):
@@ -487,18 +510,17 @@ Options:
     s   Log system API calls
 
     a   Log everything"""
-        global log_mem_read, log_mem_write, log_instr, log_syscalls
         if args == "a":
             args = "irsw"
         print("Log level:")
-        log_mem_read = any(x in args for x in ["r", "read"])
-        print(f"[{'x' if log_mem_read else ' '}] mem read")
-        log_mem_write = any(x in args for x in ["w", "write"])
-        print(f"[{'x' if log_mem_write else ' '}] mem write")
-        log_instr = any(x in args for x in ["i", "instr"])
-        print(f"[{'x' if log_instr else ' '}] instructions")
-        log_syscalls = any(x in args for x in ["s", "sys"])
-        print(f"[{'x' if log_syscalls else ' '}] API calls")
+        state.log_mem_read = any(x in args for x in ["r", "read"])
+        print(f"[{'x' if state.log_mem_read else ' '}] mem read")
+        state.log_mem_write = any(x in args for x in ["w", "write"])
+        print(f"[{'x' if state.log_mem_write else ' '}] mem write")
+        state.log_instr = any(x in args for x in ["i", "instr"])
+        print(f"[{'x' if state.log_instr else ' '}] instructions")
+        state.log_apicalls = any(x in args for x in ["s", "sys"])
+        print(f"[{'x' if state.log_apicalls else ' '}] API calls")
 
     def do_stats(self, args):
         """Print emulation statistics: In which section are the instructions located that were executed, which
@@ -522,17 +544,15 @@ details on this representation)"""
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
         else:
             self.rules = yara.compile(filepath=args)
-        unpacker.dump(mu, apicall_handler)
+        state.unpacker.dump(state.uc, state.apicall_handler)
         matches = self.rules.match("unpacked.exe")
         print(", ".join(map(str, matches)))
 
     def do_exit(self, args):
         """Exit un{i}packer"""
         if self.emu_started:
-            mu.emu_stop()
-            shell_event.clear()
-            emulator_event.set()
-            shell_event.wait()
+            state.uc.emu_stop()
+            state.sync.switch(True)
         with open("fortunes") as f:
             fortunes = f.read().splitlines()
         print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
@@ -548,13 +568,13 @@ details on this representation)"""
 
 
 def try_parse_address(addr):
-    if addr in apicall_handler.hooks:
-        return f"0x{addr:02x} ({apicall_handler.hooks[addr]})"
+    if addr in state.apicall_handler.hooks:
+        return f"0x{addr:02x} ({state.apicall_handler.hooks[addr]})"
     return f"0x{addr:02x}"
 
 
-def getVirtualMemorySize(sample):
-    r2 = r2pipe.open(sample)
+def getVirtualMemorySize():
+    r2 = r2pipe.open(state.sample)
     sections = r2.cmdj("iSj")
     min_offset = sys.maxsize
     total_size = 0
@@ -576,16 +596,16 @@ def entrypoint(pe):
 
 def get_reg_values():
     return {
-        "eax": mu.reg_read(UC_X86_REG_EAX),
-        "ebx": mu.reg_read(UC_X86_REG_EBX),
-        "ecx": mu.reg_read(UC_X86_REG_ECX),
-        "edx": mu.reg_read(UC_X86_REG_EDX),
-        "eip": mu.reg_read(UC_X86_REG_EIP),
-        "esp": mu.reg_read(UC_X86_REG_ESP),
-        "efl": mu.reg_read(UC_X86_REG_EFLAGS),
-        "edi": mu.reg_read(UC_X86_REG_EDI),
-        "esi": mu.reg_read(UC_X86_REG_ESI),
-        "ebp": mu.reg_read(UC_X86_REG_EBP)
+        "eax": state.uc.reg_read(UC_X86_REG_EAX),
+        "ebx": state.uc.reg_read(UC_X86_REG_EBX),
+        "ecx": state.uc.reg_read(UC_X86_REG_ECX),
+        "edx": state.uc.reg_read(UC_X86_REG_EDX),
+        "eip": state.uc.reg_read(UC_X86_REG_EIP),
+        "esp": state.uc.reg_read(UC_X86_REG_ESP),
+        "efl": state.uc.reg_read(UC_X86_REG_EFLAGS),
+        "edi": state.uc.reg_read(UC_X86_REG_EDI),
+        "esi": state.uc.reg_read(UC_X86_REG_ESI),
+        "ebp": state.uc.reg_read(UC_X86_REG_EBP)
     }
 
 
@@ -633,12 +653,12 @@ def print_imports(args):
     lines_static = []
     lines_dynamic = []
 
-    for addr, name in apicall_handler.hooks.items():
+    for addr, name in state.apicall_handler.hooks.items():
         try:
-            module = apicall_handler.module_for_function[name]
+            module = state.apicall_handler.module_for_function[name]
         except KeyError:
             module = "?"
-        if name in imports:
+        if name in state.imports:
             lines_static += [(f"0x{addr:02x}", name, module)]
         else:
             lines_dynamic += [(f"0x{addr:02x}", name, module)]
@@ -650,110 +670,106 @@ def print_imports(args):
 
 
 def print_stats():
-    duration = time() - start
+    duration = time() - state.start
     hours, rest = divmod(duration, 3600)
     minutes, seconds = divmod(rest, 60)
     print(f"\x1b[31mTime wasted emulating:\x1b[0m {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
     print("\x1b[31mAPI calls:\x1b[0m")
-    print_cols([(name, amount) for name, amount in api_calls.items()])
+    print_cols([(name, amount) for name, amount in state.api_calls.items()])
     print("\n\x1b[31mInstructions executed in sections:\x1b[0m")
-    print_cols([(name, amount) for name, amount in sections_executed.items()])
+    print_cols([(name, amount) for name, amount in state.sections_executed.items()])
     print("\n\x1b[31mRead accesses:\x1b[0m")
-    print_cols([(name, amount) for name, amount in sections_read.items()])
+    print_cols([(name, amount) for name, amount in state.sections_read.items()])
     print("\n\x1b[31mWrite accesses:\x1b[0m")
-    print_cols([(name, amount) for name, amount in sections_written.items()])
+    print_cols([(name, amount) for name, amount in state.sections_written.items()])
 
 
 def hook_code(uc, address, size, user_data):
-    global allowed_addr_ranges
     shell.update_prompt(address)
-    if not emulator_event.is_set():
-        shell_event.set()  # previous command is finished, shell can start again
-    emulator_event.wait()
+    if not state.sync.emulator_event.is_set():
+        state.sync.client_event.set()  # previous command is finished, shell can start again
+    state.sync.emulator_event.wait()
 
-    with data_lock:
-        breakpoint_hit = address in breakpoints
+    with state.data_lock:
+        breakpoint_hit = address in state.breakpoints
     if breakpoint_hit:
         print("\x1b[31mBreakpoint hit!\x1b[0m")
         pause_emu()
-    if address == endaddr:
+    if address == state.endaddr:
         print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
-        unpacker.dump(uc, apicall_handler)
+        state.unpacker.dump(uc, state.apicall_handler)
         pause_emu()
 
-    if write_execute_control and address not in apicall_handler.hooks and (
-            address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):
-        if any(lower <= address <= upper for (lower, upper) in sorted(write_targets)):
+    if state.write_execute_control and address not in state.apicall_handler.hooks and (
+            address < state.HOOK_ADDR or address > state.HOOK_ADDR + 0x1000):
+        if any(lower <= address <= upper for (lower, upper) in sorted(state.write_targets)):
             print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
-            unpacker.dump(uc, apicall_handler)
+            state.unpacker.dump(uc, state.apicall_handler)
             pause_emu()
 
-    if section_hopping_control and address not in apicall_handler.hooks and address - 0x7 not in apicall_handler.hooks and (
-            address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
-        if not unpacker.is_allowed(address):
-            sec_name = unpacker.get_section(address)
+    if state.section_hopping_control and address not in state.apicall_handler.hooks and address - 0x7 not in state.apicall_handler.hooks and (
+            address < state.HOOK_ADDR or address > state.HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
+        if not state.unpacker.is_allowed(address):
+            sec_name = state.unpacker.get_section(address)
             print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
-            unpacker.allow(address)
-            unpacker.dump(uc, apicall_handler)
+            state.unpacker.allow(address)
+            state.unpacker.dump(uc, state.apicall_handler)
             pause_emu()
 
-    curr_section = unpacker.get_section(address)
-    if curr_section not in sections_executed:
-        sections_executed[curr_section] = 1
+    curr_section = state.unpacker.get_section(address)
+    if curr_section not in state.sections_executed:
+        state.sections_executed[curr_section] = 1
     else:
-        sections_executed[curr_section] += 1
+        state.sections_executed[curr_section] += 1
 
-    if address in apicall_handler.hooks:
+    if address in state.apicall_handler.hooks:
         esp = uc.reg_read(UC_X86_REG_ESP)
-        api_call_name = apicall_handler.hooks[address]
-        ret, esp = apicall_handler.apicall(address, api_call_name, uc, esp, log_syscalls)
+        api_call_name = state.apicall_handler.hooks[address]
+        ret, esp = state.apicall_handler.apicall(address, api_call_name, uc, esp, state.log_apicalls)
 
-        if api_call_name not in api_calls:
-            api_calls[api_call_name] = 1
+        if api_call_name not in state.api_calls:
+            state.api_calls[api_call_name] = 1
         else:
-            api_calls[api_call_name] += 1
+            state.api_calls[api_call_name] += 1
         if ret is not None:  # might be a void function
-            uc.mem_write(HOOK_ADDR, struct.pack("<I", ret))
+            uc.mem_write(state.HOOK_ADDR, struct.pack("<I", ret))
         uc.reg_write(UC_X86_REG_ESP, esp)
-    log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
-    with data_lock:
-        if single_instruction:
-            emulator_event.clear()
+    state.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
+    with state.data_lock:
+        if state.single_instruction:
+            state.sync.emulator_event.clear()
 
 
 def pause_emu():
-    emulator_event.clear()
-    shell_event.set()
-    emulator_event.wait()
+    state.sync.switch(False)
 
 
 # Method is executed before memory access
 def hook_mem_access(uc, access, address, size, value, user_data):
-    global write_targets
-    curr_section = unpacker.get_section(address)
+    curr_section = state.unpacker.get_section(address)
     access_type = ""
     if access == UC_MEM_READ:
         access_type = "READ"
-        if curr_section not in sections_read:
-            sections_read[curr_section] = 1
+        if curr_section not in state.sections_read:
+            state.sections_read[curr_section] = 1
         else:
-            sections_read[curr_section] += 1
-        log_mem_read and print(">>> Memory is being READ at 0x%x, data size = %u" % (address, size))
+            state.sections_read[curr_section] += 1
+        state.log_mem_read and print(">>> Memory is being READ at 0x%x, data size = %u" % (address, size))
     elif access == UC_MEM_WRITE:
         access_type = "WRITE"
-        write_targets = list(merge(write_targets + [(address, address + size)]))
-        if curr_section not in sections_written:
-            sections_written[curr_section] = 1
+        state.write_targets = list(merge(state.write_targets + [(address, address + size)]))
+        if curr_section not in state.sections_written:
+            state.sections_written[curr_section] = 1
         else:
-            sections_written[curr_section] += 1
-        log_mem_write and print(
+            state.sections_written[curr_section] += 1
+        state.log_mem_write and print(
             ">>> Memory is being WRITTEN at 0x%x, data size = %u, data value = 0x%x" % (address, size, value))
     else:
         for access_name, val in unicorn_const.__dict__.items():
             if val == access and "UC_MEM" in access_name:
                 access_type = access_name[6:]  # remove UC_MEM from the access type
                 print(f"Unexpected mem access type {access_type}, addr: 0x{address:02x}")
-    if any(lower <= address <= upper for lower, upper in mem_breakpoints):
+    if any(lower <= address <= upper for lower, upper in state.mem_breakpoints):
         print(f"\x1b[31mMemory breakpoint hit! Access {access_type} to 0x{address:02x}")
         pause_emu()
 
@@ -762,20 +778,19 @@ def hook_mem_invalid(uc, access, address, size, value, user_data):
     for access_name, val in unicorn_const.__dict__.items():
         if val == access and "UC_MEM" in access_name:
             print(f"Invalid memory access {access_name}, addr: 0x{address:02x}")
-            mu.emu_stop()
+            state.uc.emu_stop()
             return
 
 
 def emu():
     try:
-        global start
-        start = time()
-        if endaddr == sys.maxsize:
-            print(f"Emulation starting at {hex(startaddr)}")
+        state.start = time()
+        if state.endaddr == sys.maxsize:
+            print(f"Emulation starting at {hex(state.startaddr)}")
         else:
-            print(f"Emulation starting. Bounds: from {hex(startaddr)} to {hex(endaddr)}")
-        # Start emulation from startaddr
-        mu.emu_start(startaddr, sys.maxsize)
+            print(f"Emulation starting. Bounds: from {hex(state.startaddr)} to {hex(state.endaddr)}")
+        # Start emulation from state.startaddr
+        state.uc.emu_start(state.startaddr, sys.maxsize)
 
         # Result of the emulation
         print(">>> Emulation done. Below is the CPU context")
@@ -784,38 +799,37 @@ def emu():
         print_stats()
     except UcError as e:
         print(f"Error: {e}")
-        unpacker.dump(mu, apicall_handler)
-        emulator_event.clear()
+        state.unpacker.dump(state.uc, state.apicall_handler)
+        state.sync.emulator_event.clear()
         shell.emu_started = False
-        shell_event.set()
+        state.sync.client_event.set()
     finally:
-        unpacker.dump(mu, apicall_handler)
-        emulator_event.clear()
+        state.unpacker.dump(state.uc, state.apicall_handler)
+        state.sync.emulator_event.clear()
         shell.emu_started = False
-        shell_event.set()
+        state.sync.client_event.set()
 
 
-def setup_processinfo(mu):
-    global TEB_BASE, PEB_BASE
-    TEB_BASE = 0x200000
-    PEB_BASE = TEB_BASE + 0x1000
-    LDR_PTR = PEB_BASE + 0x1000
+def setup_processinfo():
+    state.TEB_BASE = 0x200000
+    state.PEB_BASE = state.TEB_BASE + 0x1000
+    LDR_PTR = state.PEB_BASE + 0x1000
     LIST_ENTRY_BASE = LDR_PTR + 0x1000
 
     teb = TEB(
         -1,  # fs:00h
-        STACK_START,  # fs:04h
-        STACK_START - STACK_SIZE,  # fs:08h
+        state.STACK_ADDR + state.STACK_SIZE,  # fs:04h
+        state.STACK_ADDR,  # fs:08h
         0,  # fs:0ch
         0,  # fs:10h
         0,  # fs:14h
-        TEB_BASE,  # fs:18h (teb base)
+        state.TEB_BASE,  # fs:18h (teb base)
         0,  # fs:1ch
         0xdeadbeef,  # fs:20h (process id)
         0xdeadbeef,  # fs:24h (current thread id)
         0,  # fs:28h
         0,  # fs:2ch
-        PEB_BASE,  # fs:3ch (peb base)
+        state.PEB_BASE,  # fs:3ch (peb base)
     )
 
     peb = PEB(
@@ -824,7 +838,7 @@ def setup_processinfo(mu):
         0,
         0,
         0xffffffff,
-        BASE_ADDR,
+        state.BASE_ADDR,
         LDR_PTR,
     )
 
@@ -869,141 +883,138 @@ def setup_processinfo(mu):
     kernel32_payload = bytes(kernel32_entry)
 
 
-    mu.mem_map(TEB_BASE, align(0x5000))
-    mu.mem_write(TEB_BASE, teb_payload)
-    mu.mem_write(PEB_BASE, peb_payload)
-    mu.mem_write(LDR_PTR, ldr_payload)
-    mu.mem_write(LIST_ENTRY_BASE, ntdll_payload)
-    mu.mem_write(LIST_ENTRY_BASE + 12, kernelbase_payload)
-    mu.mem_write(LIST_ENTRY_BASE + 24, kernel32_payload)
-    mu.windows_tib = TEB_BASE
+    state.uc.mem_map(state.TEB_BASE, align(0x5000))
+    state.uc.mem_write(state.TEB_BASE, teb_payload)
+    state.uc.mem_write(state.PEB_BASE, peb_payload)
+    state.uc.mem_write(LDR_PTR, ldr_payload)
+    state.uc.mem_write(LIST_ENTRY_BASE, ntdll_payload)
+    state.uc.mem_write(LIST_ENTRY_BASE + 12, kernelbase_payload)
+    state.uc.mem_write(LIST_ENTRY_BASE + 24, kernel32_payload)
+    state.uc.windows_tib = state.TEB_BASE
 
 
-def load_dll(mu, path_dll, start_addr):
+def load_dll(path_dll, start_addr):
     filename = os.path.splitext(os.path.basename(path_dll))[0]
     if not os.path.exists(f"DLLs/{filename}.ldll"):
         dll = pefile.PE(path_dll)
         loaded_dll = dll.get_memory_mapped_image(ImageBase=start_addr)
         with open(f"DLLs/{filename}.ldll", 'wb') as f:
             f.write(loaded_dll)
-        mu.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
-        mu.mem_write(start_addr, loaded_dll)
+        state.uc.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
+        state.uc.mem_write(start_addr, loaded_dll)
     else:
         with open(f"DLLs/{filename}.ldll", 'rb') as dll:
             loaded_dll = dll.read()
-            mu.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
-            mu.mem_write(start_addr, loaded_dll)
+            state.uc.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
+            state.uc.mem_write(start_addr, loaded_dll)
 
 
 def init_uc():
-    global virtualmemorysize, BASE_ADDR, STACK_ADDR, STACK_SIZE, STACK_START, HOOK_ADDR, mu, startaddr, loaded, apicall_handler
     # Calculate required memory
-    pe = pefile.PE(sample)
-    BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
-    unpacker.BASE_ADDR = BASE_ADDR
-    virtualmemorysize = getVirtualMemorySize(sample)
-    STACK_ADDR = 0x0
-    STACK_SIZE = 1024 * 1024
-    STACK_START = STACK_ADDR + STACK_SIZE
-    unpacker.secs += [{"name": "stack", "vaddr": STACK_ADDR, "vsize": STACK_SIZE}]
-    HOOK_ADDR = STACK_START + 0x3000 + 0x1000
+    pe = pefile.PE(state.sample)
+    state.BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
+    state.unpacker.BASE_ADDR = state.BASE_ADDR
+    state.virtualmemorysize = getVirtualMemorySize(state.sample)
+    state.STACK_ADDR = 0x0
+    state.STACK_SIZE = 1024 * 1024
+    STACK_START = state.STACK_ADDR + state.STACK_SIZE
+    state.unpacker.secs += [{"name": "stack", "vaddr": state.STACK_ADDR, "vsize": state.STACK_SIZE}]
+    state.HOOK_ADDR = STACK_START + 0x3000 + 0x1000
 
     # Start unicorn emulator with x86-32bit architecture
-    mu = Uc(UC_ARCH_X86, UC_MODE_32)
-    if startaddr is None:
-        startaddr = entrypoint(pe)
-    loaded = pe.get_memory_mapped_image(ImageBase=BASE_ADDR)
-    virtualmemorysize = align(virtualmemorysize + 0x10000, page_size=4096)  # Space possible IAT rebuilding
-    unpacker.virtualmemorysize = virtualmemorysize
-    mu.mem_map(BASE_ADDR, virtualmemorysize)
-    mu.mem_write(BASE_ADDR, loaded)
+    state.uc = Uc(UC_ARCH_X86, UC_MODE_32)
+    if state.startaddr is None:
+        state.startaddr = entrypoint(pe)
+    state.loaded_image = pe.get_memory_mapped_image(ImageBase=state.BASE_ADDR)
+    state.virtualmemorysize = align(state.virtualmemorysize + 0x10000, page_size=4096)  # Space possible IAT rebuilding
+    state.unpacker.virtualmemorysize = state.virtualmemorysize
+    state.uc.mem_map(state.BASE_ADDR, state.virtualmemorysize)
+    state.uc.mem_write(state.BASE_ADDR, state.loaded_image)
 
-    setup_processinfo(mu)
+    setup_processinfo()
 
     # Load DLLs
-    load_dll(mu, "DLLs/KernelBase.dll", 0x73D00000)
-    load_dll(mu, "DLLs/kernel32.dll", 0x755D0000)
-    load_dll(mu, "DLLs/ntdll.dll", 0x77400000)
+    load_dll("DLLs/KernelBase.dll", 0x73D00000)
+    load_dll("DLLs/kernel32.dll", 0x755D0000)
+    load_dll("DLLs/ntdll.dll", 0x77400000)
 
     # initialize machine registers
-    mu.mem_map(STACK_ADDR, STACK_SIZE)
-    mu.reg_write(UC_X86_REG_ESP, STACK_ADDR + int(STACK_SIZE / 2))
-    mu.reg_write(UC_X86_REG_EBP, STACK_ADDR + int(STACK_SIZE / 2))
-    mu.mem_write(mu.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1]))
-    mu.reg_write(UC_X86_REG_ECX, startaddr)
-    mu.reg_write(UC_X86_REG_EDX, startaddr)
-    mu.reg_write(UC_X86_REG_ESI, startaddr)
-    mu.reg_write(UC_X86_REG_EDI, startaddr)
+    state.uc.mem_map(state.STACK_ADDR, state.STACK_SIZE)
+    state.uc.reg_write(UC_X86_REG_ESP, state.STACK_ADDR + int(state.STACK_SIZE / 2))
+    state.uc.reg_write(UC_X86_REG_EBP, state.STACK_ADDR + int(state.STACK_SIZE / 2))
+    state.uc.mem_write(state.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1]))
+    state.uc.reg_write(UC_X86_REG_ECX, state.startaddr)
+    state.uc.reg_write(UC_X86_REG_EDX, state.startaddr)
+    state.uc.reg_write(UC_X86_REG_ESI, state.startaddr)
+    state.uc.reg_write(UC_X86_REG_EDI, state.startaddr)
 
     # setup section dict used for custom memory protection
     atn = {}  # Dict Address to Name: (StartVAddr, EndVAddr) -> Name
     ntp = {}  # Dict Name to Protection Tupel: Name -> (Execute, Read, Write)
 
-    new_pe = PE(mu, BASE_ADDR)
+    new_pe = PE(state.uc, state.BASE_ADDR)
     prot_val = lambda x, y: True if x & y != 0 else False
     for s in new_pe.section_list:
-        atn[(s.VirtualAddress + BASE_ADDR, s.VirtualAddress + BASE_ADDR + s.VirtualSize)] = convert_to_string(s.Name)
+        atn[(s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.VirtualSize)] = convert_to_string(s.Name)
         ntp[convert_to_string(s.Name)] = (prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000), prot_val(s.Characteristics, 0x80000000))
 
     # for s in pe.sections:
-    #    atn[(s.VirtualAddress + BASE_ADDR, s.VirtualAddress + BASE_ADDR + s.Misc_VirtualSize)] = s.Name
+    #    atn[(s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.Misc_VirtualSize)] = s.Name
     #    ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
 
     # init syscall handling and prepare hook memory for return values
-    apicall_handler = WinApiCalls(BASE_ADDR, virtualmemorysize, HOOK_ADDR, breakpoints, sample, atn, ntp)
-    mu.mem_map(HOOK_ADDR, 0x1000)
-    unpacker.secs += [{"name": "hooks", "vaddr": HOOK_ADDR, "vsize": 0x1000}]
-    hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', HOOK_ADDR) + bytes.fromhex(
+    state.apicall_handler = WinApiCalls(state.BASE_ADDR, state.virtualmemorysize, state.HOOK_ADDR, state.breakpoints, state.sample, atn, ntp)
+    state.uc.mem_map(state.HOOK_ADDR, 0x1000)
+    state.unpacker.secs += [{"name": "hooks", "vaddr": state.HOOK_ADDR, "vsize": 0x1000}]
+    hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', state.HOOK_ADDR) + bytes.fromhex(
         'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
-    mu.mem_write(HOOK_ADDR, hexstr)
+    state.uc.mem_write(state.HOOK_ADDR, hexstr)
 
     # handle imports
     for lib in pe.DIRECTORY_ENTRY_IMPORT:
         for func in lib.imports:
             func_name = func.name.decode() if func.name is not None else f"no name: 0x{func.address:02x}"
             dll_name = lib.dll.decode() if lib.dll is not None else "-- unknown --"
-            imports.add(func_name)
-            curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
-            mu.mem_write(func.address, struct.pack('<I', curr_hook_addr))
+            state.imports.add(func_name)
+            curr_hook_addr = state.apicall_handler.add_hook(state.uc, func_name, dll_name)
+            state.uc.mem_write(func.address, struct.pack('<I', curr_hook_addr))
 
-    hdr = PE(mu, BASE_ADDR)
+    hdr = PE(state.uc, state.BASE_ADDR)
 
     # TODO below new version but needs testing as it is crashing
-    #import_table = get_imp(mu, hdr.data_directories[1].VirtualAddress, BASE_ADDR, hdr.data_directories[1].Size, True)
+    #import_table = get_imp(state.uc, hdr.data_directories[1].VirtualAddress, state.BASE_ADDR, hdr.data_directories[1].Size, True)
     #for lib in import_table:
     #    for func_name, func_addr in lib.imports:
     #        func_name = func_name if func_name is not None else f"no name: 0x{func_addr:02x}"
     #        dll_name = lib.Name if lib.Name is not None else "-- unknown --"
     #        imports.add(func_name)
-    #        curr_hook_addr = apicall_handler.add_hook(mu, func_name, dll_name)
-    #        mu.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
+    #        curr_hook_addr = state.apicall_handler.add_hook(state.uc, func_name, dll_name)
+    #        state.uc.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
 
 
 
     # Patch DLLs with hook
     # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll
-    apicall_handler.add_hook(mu, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
-    apicall_handler.add_hook(mu, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
-    apicall_handler.add_hook(mu, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)
-    apicall_handler.add_hook(mu, "LoadLibraryA", "KernelBase.dll", 0x73D00000 + 0xf20d0)
-    apicall_handler.add_hook(mu, "GetProcAddress", "KernelBase.dll", 0x73D00000 + 0x102870)
+    state.apicall_handler.add_hook(state.uc, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
+    state.apicall_handler.add_hook(state.uc, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
+    state.apicall_handler.add_hook(state.uc, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)
+    state.apicall_handler.add_hook(state.uc, "LoadLibraryA", "KernelBase.dll", 0x73D00000 + 0xf20d0)
+    state.apicall_handler.add_hook(state.uc, "GetProcAddress", "KernelBase.dll", 0x73D00000 + 0x102870)
 
-    apicall_handler.add_hook(mu, "VirtualProtect", "kernel32.dll", 0x755D0000 + 0x16760)
-    apicall_handler.add_hook(mu, "VirtualAlloc", "kernel32.dll", 0x755D0000 + 0x166a0)
-    apicall_handler.add_hook(mu, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
-    apicall_handler.add_hook(mu, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
-    apicall_handler.add_hook(mu, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
+    state.apicall_handler.add_hook(state.uc, "VirtualProtect", "kernel32.dll", 0x755D0000 + 0x16760)
+    state.apicall_handler.add_hook(state.uc, "VirtualAlloc", "kernel32.dll", 0x755D0000 + 0x166a0)
+    state.apicall_handler.add_hook(state.uc, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
+    state.apicall_handler.add_hook(state.uc, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
+    state.apicall_handler.add_hook(state.uc, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
 
 
     # Add hooks
-    mu.hook_add(UC_HOOK_CODE, hook_code)
-    mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE | UC_HOOK_MEM_FETCH, hook_mem_access)
-    mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, hook_mem_invalid)
+    state.uc.hook_add(UC_HOOK_CODE, hook_code)
+    state.uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE | UC_HOOK_MEM_FETCH, hook_mem_access)
+    state.uc.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, hook_mem_invalid)
 
 
 def init_sample(show_fortune=True):
-    global sample, unpacker, yara_matches, startaddr, endaddr, allowed_addr_ranges, section_hopping_control, write_execute_control
-    global sections_executed, sections_read, sections_written
     try:
         histfile = ".unpacker_history"
         if not os.path.exists(histfile):
@@ -1030,11 +1041,11 @@ def init_sample(show_fortune=True):
                 print("Error parsing ID")
                 continue
             if 0 <= id < len(known_samples) - 1:
-                sample = known_samples[id].split(";")[1]
+                state.sample = known_samples[id].split(";")[1]
                 success = True
             elif id == len(known_samples) - 1:
-                sample = input("Please enter the path to the file: ")
-                if not os.path.isfile(sample):
+                state.sample = input("Please enter the path to the file: ")
+                if not os.path.isfile(state.sample):
                     print(f"Not a valid file!")
                 else:
                     success = True
@@ -1042,14 +1053,14 @@ def init_sample(show_fortune=True):
                 print(f"Invalid ID. Allowed range: 0 - {len(known_samples) - 1}")
 
             try:
-                unpacker, yara_matches = get_unpacker(sample)
+                state.unpacker, state.yara_matches = get_unpacker(state.sample)
             except RuntimeError as e:
                 print(e)
                 success = False
                 continue
-            startaddr = unpacker.get_entrypoint()
-            endaddr, _ = unpacker.get_tail_jump()
-            write_execute_control = unpacker.write_execute_control
+            state.startaddr = state.unpacker.get_entrypoint()
+            state.endaddr, _ = state.unpacker.get_tail_jump()
+            state.write_execute_control = state.unpacker.write_execute_control
 
         if show_fortune:
             with open("fortunes") as f:
@@ -1059,11 +1070,11 @@ def init_sample(show_fortune=True):
             print("")
 
         with open(histfile, "w") as f:
-            f.writelines("\n".join(sorted(set([f"{yara_matches[-1]};{sample}"] + known_samples[:-1]))))
-        allowed_addr_ranges = unpacker.get_allowed_addr_ranges()
+            f.writelines("\n".join(sorted(set([f"{state.yara_matches[-1]};{state.sample}"] + known_samples[:-1]))))
+        state.allowed_addr_ranges = state.unpacker.get_allowed_addr_ranges()
 
-        if not allowed_addr_ranges:
-            section_hopping_control = False
+        if not state.allowed_addr_ranges:
+            state.section_hopping_control = False
     except EOFError:
         with open("fortunes") as f:
             fortunes = f.read().splitlines()
@@ -1072,11 +1083,12 @@ def init_sample(show_fortune=True):
 
 
 if __name__ == '__main__':
+    state = State(Sync())
     with open("banner") as f:
         print(f.read())
     init_sample()
     init_uc()
 
     shell = Shell()
-    shell.update_prompt(startaddr)
+    shell.update_prompt(state.startaddr)
     threading.Thread(target=shell.cmdloop).start()
