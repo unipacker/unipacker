@@ -242,6 +242,36 @@ def print_section_table(uc, base_addr):
         offset += header_sizes["IMAGE_SECTION_HEADER"]
 
 
+def print_iat(uc, base_addr):
+    imp = parse_memory_to_header(uc, base_addr, "IMPORTS")
+    print("IMPORT ADDRESS TABLE:")
+    for i in imp:
+        indent = '\t'
+        if i.Name == 0:
+            return
+        print(f"{indent} Name: {get_string(base_addr + i.Name, uc)}")
+        print(f"{indent} Characteristics (Hint/Name): {hex(i.Characteristics)}")
+        print(f"{indent} TimeDateStamp: {hex(i.TimeDateStamp)}")
+        print(f"{indent} ForwarderChain: {hex(i.ForwarderChain)}")
+        print(f"{indent} FirstThunk: {hex(i.FirstThunk)}")
+        indent = '\t\t'
+
+        if i.Characteristics == 0:
+            print(f"{indent} Hint/Name Array is not set")
+        else:
+            curr_pos = 0
+            imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics, 4))[0]
+            while imp_array_element != 0:
+                if imp_array_element >> 0x1f == 1:
+                    print(f"{indent} Import by Ordinal: {hex(imp_array_element-0x80000000)}")
+                else:
+                    print(f"{indent} Import by Name: {get_string(base_addr + imp_array_element + 0x2, uc)}")
+                curr_pos += 0x4
+                imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics + curr_pos, 4))[0]
+
+            print()
+
+
 def print_all_headers(uc, base_addr):
     print_dos_header(uc, base_addr)
     print()
@@ -251,6 +281,7 @@ def print_all_headers(uc, base_addr):
     print()
     print_section_table(uc, base_addr)
     print()
+    print_iat(uc, base_addr)
 
 
 def calc_offset(e_lfanew, num_of_sec, base_addr, header=None):
