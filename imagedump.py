@@ -84,6 +84,7 @@ class ImageDump(object):
         dllname_to_ptrs = []
 
         for k in dllname_to_functionlist.keys():
+            k = k.split('#')[0]
             dllname_to_ptrs.append((k, self.locate_ptr_to_occurences(b, self.find_occurences(b, k))))
 
         if len(dllname_to_ptrs) == 1 and len(dllname_to_ptrs[0][1]) == 1:
@@ -271,7 +272,6 @@ class ImageDump(object):
         #os.remove(".unipacker_brokenimport.exe")
         return hdr
 
-
     def chunk_to_image_section_hdr(self, hdr, base_addr, allocated_chunks):
         number_of_added_sections = 0
         for chunk_start, chunk_end in allocated_chunks:
@@ -417,7 +417,6 @@ class ImageDump(object):
 
         hdr.sync(uc)
 
-
         print("Fixing SizeOfImage...")
         hdr.opt_header.SizeOfImage = alignments(total_size, hdr.opt_header.SectionAlignment)
 
@@ -437,11 +436,12 @@ class ImageDump(object):
         print(f"Dumping state to {path}")
         pe_write(uc, base_addr, total_size, path)
 
+
 # YZPackDump can use fix_imports_by_rebuilding as well
 class YZPackDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
-        # return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+        return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
+        # return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
 class ASPackDump(ImageDump):
@@ -452,6 +452,7 @@ class ASPackDump(ImageDump):
 class FSGDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
 
 class MEWDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
