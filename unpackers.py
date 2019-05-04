@@ -78,6 +78,7 @@ class UPXUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.jmp_to_oep, self.oep = self.find_tail_jump()
+        self.dumper = UPXDump()
 
     def find_tail_jump(self):
         r2 = r2pipe.open(self.sample)
