@@ -54,3 +54,10 @@ class LIST_ENTRY(Structure):
         ("Prev", c_uint32),
         ("Value", c_uint32),
     ]
+
+class _FILETIME(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("dwLowDateTime", c_uint32),
+        ("dwHighDateTime", c_uint32),
+    ]

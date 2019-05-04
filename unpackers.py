@@ -3,7 +3,7 @@ import sys
 import r2pipe
 import yara
 
-from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump
+from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump
 
 
 class DefaultUnpacker(object):

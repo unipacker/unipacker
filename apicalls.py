@@ -10,7 +10,7 @@ from utils import align, merge, remove_range, print_cols, get_string, print_dlln
     calc_threadid
 
 import time
-from pe_structs import _FILETIME
+from kernel_structs import _FILETIME
 
 
 apicall_mapping = {}
