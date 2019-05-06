@@ -690,17 +690,10 @@ def hook_code(uc, address, size, user_data):
 
     if section_hopping_control and address not in apicall_handler.hooks and address - 0x7 not in apicall_handler.hooks and (
             address < HOOK_ADDR or address > HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
-        allowed = False
-        for start, end in allowed_addr_ranges:
-            if start <= address <= end:
-                allowed = True
-                break
-        if not allowed:
+        if not unpacker.is_allowed(address):
             sec_name = unpacker.get_section(address)
             print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
-            curr_section_range = unpacker.get_section_range(sec_name)
-            if curr_section_range:
-                allowed_addr_ranges += [unpacker.get_section_range(sec_name)]
+            unpacker.allow(address)
             unpacker.dump(uc, apicall_handler)
             pause_emu()
 

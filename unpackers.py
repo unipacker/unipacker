@@ -50,6 +50,18 @@ class DefaultUnpacker(object):
     def dump(self, uc, apicall_handler, path="unpacked.exe"):
         self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, apicall_handler, path)
 
+    def is_allowed(self, address):
+        for start, end in self.get_allowed_addr_ranges():
+            if start <= address <= end:
+                return True
+        return False
+
+    def allow(self, address):
+        sec_name = self.get_section(address)
+        curr_section_range = self.get_section_range(sec_name)
+        if curr_section_range:
+            self.allowed_sections += [sec_name]
+
     def get_allowed_addr_ranges(self):
         allowed_ranges = []
         for s in self.secs:
