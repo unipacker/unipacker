@@ -581,7 +581,7 @@ def getVirtualMemorySize():
         if 'vsize' in sec:
             total_size += sec['vsize']
     r2.quit()
-    total_size += (min_offset - BASE_ADDR)
+    total_size += (min_offset - state.BASE_ADDR)
     print(f"Virtualmemorysize: {hex(total_size)}")
 
     return total_size
@@ -910,7 +910,7 @@ def init_uc():
     pe = pefile.PE(state.sample)
     state.BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
     state.unpacker.BASE_ADDR = state.BASE_ADDR
-    state.virtualmemorysize = getVirtualMemorySize(state.sample)
+    state.virtualmemorysize = getVirtualMemorySize()
     state.STACK_ADDR = 0x0
     state.STACK_SIZE = 1024 * 1024
     STACK_START = state.STACK_ADDR + state.STACK_SIZE
@@ -952,11 +952,12 @@ def init_uc():
     prot_val = lambda x, y: True if x & y != 0 else False
     for s in new_pe.section_list:
         atn[(
-        s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.VirtualSize)] = convert_to_string(
+            s.VirtualAddress + state.BASE_ADDR,
+            s.VirtualAddress + state.BASE_ADDR + s.VirtualSize)] = convert_to_string(
             s.Name)
         ntp[convert_to_string(s.Name)] = (
-        prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000),
-        prot_val(s.Characteristics, 0x80000000))
+            prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000),
+            prot_val(s.Characteristics, 0x80000000))
 
     # for s in pe.sections:
     #    atn[(s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.Misc_VirtualSize)] = s.Name

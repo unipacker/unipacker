@@ -1,19 +1,15 @@
 import collections
 import struct
+import time
+from ctypes import *
 from inspect import signature
 
-from ctypes import *
-import collections
 import pefile
-import time
 from unicorn.x86_const import UC_X86_REG_EAX
-import random
-from utils import align, merge, remove_range, print_cols, get_string, print_dllname_to_functionlist, calc_processid, \
-    calc_threadid
 
-import time
 from kernel_structs import _FILETIME
-
+from utils import align, merge, remove_range, print_cols, get_string, calc_processid, \
+    calc_threadid
 
 apicall_mapping = {}
 
@@ -99,7 +95,8 @@ class WinApiCalls(object):
             0x80: (True, True, True),  # 0x80 PAGE_EXECUTE_WRITECOPY
         }
         for saddr, eaddr in self.atn.keys():
-            if (address <= saddr <= address+size or address <= eaddr <= address+size) and new_protect in memory_protection:
+            if (
+                    address <= saddr <= address + size or address <= eaddr <= address + size) and new_protect in memory_protection:
                 name = self.atn[(saddr, eaddr)]
                 self.ntp[name] = memory_protection[new_protect]
         return new_protect
@@ -295,9 +292,8 @@ class WinApiCalls(object):
             mod_name += "#" + str(counter)
             self.dllname_to_functionlist[mod_name] = []
 
-        #print(f"LoadLibrary: {mod_name}")
-        #print_dllname_to_functionlist(self.dllname_to_functionlist)
-
+        # print(f"LoadLibrary: {mod_name}")
+        # print_dllname_to_functionlist(self.dllname_to_functionlist)
 
         log and print(f"\tHandle: 0x{handle:02x}")
         return handle
@@ -382,7 +378,7 @@ class WinApiCalls(object):
 
     @api_call()
     def QueryPerformanceCounter(self, uc, esp, log, ptr):
-        ticks = time.perf_counter() * (10**9)
+        ticks = time.perf_counter() * (10 ** 9)
         uc.mem_write(ptr, struct.pack("<Q", ticks))
         log and print(f"QueryPerformanceCounter: {ticks} ticks")
 
@@ -399,7 +395,6 @@ class WinApiCalls(object):
             return features[feature]
         log and print(f"IsProcessorFeaturePresent: Feature {feature} is unknown. Knwon features: {feature_description}")
         return 0
-
 
     @api_call()
     def InitializeCriticalSection(self, uc, esp, log, section_ptr):

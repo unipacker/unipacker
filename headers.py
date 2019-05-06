@@ -6,7 +6,7 @@ from unicorn import UcError
 
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
     _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR
-from utils import InvalidPEFile, ImportValues, get_string2
+from utils import InvalidPEFile, ImportValues, get_string, get_string2
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -267,7 +267,7 @@ def print_iat(uc, base_addr):
             imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics, 4))[0]
             while imp_array_element != 0:
                 if imp_array_element >> 0x1f == 1:
-                    print(f"{indent} Import by Ordinal: {hex(imp_array_element-0x80000000)}")
+                    print(f"{indent} Import by Ordinal: {hex(imp_array_element - 0x80000000)}")
                 else:
                     print(f"{indent} Import by Name: {get_string(base_addr + imp_array_element + 0x2, uc)}")
                 curr_pos += 0x4

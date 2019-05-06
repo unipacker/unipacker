@@ -1,8 +1,9 @@
+import random
 import string
 import struct
 
 import pefile
-import random
+
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -66,7 +67,6 @@ def convert_to_string(b):
         return str(hex(int.from_bytes(b, "little")))
 
 
-
 def get_string2(ptr, uc):
     printable_chars = bytes(string.printable, 'ascii')
     buf = b''
@@ -102,16 +102,19 @@ def calc_export_offset_of_dll(dllpath, function_name):
             return e.address
     return None
 
+
 def print_dllname_to_functionlist(dllname_to_functionlist):
     for dll in dllname_to_functionlist:
         print(dll)
         for fct_name, fct_addr in dllname_to_functionlist[dll]:
             print(f"\t{fct_name}, {hex(fct_addr)}")
 
+
 def print_addr_list(list_name, list):
     hex = list_name
     hex += ', '.join('0x%02x' % l for l in list)
     print(hex)
+
 
 def calc_processid():
     x = random.randint(2000, 6000)

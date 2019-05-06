@@ -1,21 +1,20 @@
-import collections
-
-import pefile
 import os
-from unicorn.x86_const import *
 import struct
 import sys
 
-from headers import print_dos_header, print_all_headers, hdr_read, PE, pe_write
-from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_DATA_DIRECTORY, _IMAGE_OPTIONAL_HEADER, \
+import pefile
+from unicorn.x86_const import *
+
+from headers import PE, pe_write
+from pe_structs import _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER, IMAGE_IMPORT_DESCRIPTOR
-from utils import align, alignments, InvalidPEFile, convert_to_string, print_dllname_to_functionlist, print_addr_list
+from utils import alignments, InvalidPEFile, convert_to_string, print_addr_list
 
 
 class ImageDump(object):
 
     def fix_section(self, section, next_section_vaddr):
-        #sec_name = section.Name.decode().strip("\x00")
+        # sec_name = section.Name.decode().strip("\x00")
         sec_name = convert_to_string(section.Name)
         print(f"Size of raw data ({sec_name}): 0x{section.SizeOfRawData:02x}, "
               f"fixed: 0x{next_section_vaddr - section.VirtualAddress:02x}")
@@ -40,7 +39,8 @@ class ImageDump(object):
             section_name = convert_to_string(hdr.section_list[i].Name)
             print(section_name)
             if section_name in ntp.keys():
-                print(f"Fixing protections for: {section_name} with {ntp[section_name][0], ntp[section_name][1], ntp[section_name][2]}")
+                print(f"Fixing protections for: {section_name} "
+                      f"with {ntp[section_name][0], ntp[section_name][1], ntp[section_name][2]}")
                 hdr.section_list[i].Characteristics = self.set_protections(hdr.section_list[i], ntp[section_name])
         return hdr
 
@@ -52,7 +52,7 @@ class ImageDump(object):
         x = binary.find(search)
         while x != -1:
             occ.append(x)
-            x = binary.find(search, (x+1), len(binary))
+            x = binary.find(search, (x + 1), len(binary))
         return occ
 
     def locate_ptr_to_occurences(self, binary, addresslist):
@@ -94,9 +94,9 @@ class ImageDump(object):
             print("FAILED here")
             return None  # FAILED
         else:
-            for i in range(len(dllname_to_ptrs)-1):
+            for i in range(len(dllname_to_ptrs) - 1):
                 addrlist = dllname_to_ptrs[i][1]
-                addrlist2 = dllname_to_ptrs[i+1][1]
+                addrlist2 = dllname_to_ptrs[i + 1][1]
                 a1, a2 = self.search_offset_two(addrlist, addrlist2, 0x14)
                 if a1 is not None and a2 is not None:
                     break
@@ -111,13 +111,13 @@ class ImageDump(object):
             offset = 0x14
 
             for i in range(len(dllname_to_ptrs)):
-                if i+1 < len(dllname_to_ptrs):
+                if i + 1 < len(dllname_to_ptrs):
                     cmp = dllname_to_ptrs[i][1][0]
                     val = None
-                    for e in dllname_to_ptrs[i+1][1]:
+                    for e in dllname_to_ptrs[i + 1][1]:
                         if cmp + 0x14 == e:
                             val = e
-                    dllname_to_ptrs[i+1] = (dllname_to_ptrs[i+1][0], [val])
+                    dllname_to_ptrs[i + 1] = (dllname_to_ptrs[i + 1][0], [val])
 
             # select pointer
             addr = dllname_to_ptrs[0][1][0]
@@ -157,9 +157,9 @@ class ImageDump(object):
         if len(possible_ptrs) == 1:
             return possible_ptrs[0][0]  # Default first TODO Check with allocated section
         ptrs = []
-        for i in range(len(possible_ptrs)-1):
+        for i in range(len(possible_ptrs) - 1):
             l1 = possible_ptrs[i]
-            l2 = possible_ptrs[i+1]
+            l2 = possible_ptrs[i + 1]
             a1, a2 = self.search_offset_two(l1, l2, offset)
             if a1 is None:
                 print("Not Found!")
@@ -170,7 +170,7 @@ class ImageDump(object):
             if elem - offset == ptrs[-1]:
                 ptrs.append(elem)
 
-        #print_addr_list(f"Printing possible ptrs for {dll_name}: ", ptrs)
+        # print_addr_list(f"Printing possible ptrs for {dll_name}: ", ptrs)
 
         return ptrs[0]
 
@@ -223,7 +223,8 @@ class ImageDump(object):
                     patch_addr.append(rva_to_image_import_by_name)
                     rva_to_image_import_by_name += len(import_by_name)
                 else:  # Import by ordinal
-                    ordinal = int(fct_name.split("/")[2], 10) + 0x80000000  # Import Lookup Table 1 bit defines ordinals (0x80000000)
+                    ordinal = int(fct_name.split("/")[2],
+                                  10) + 0x80000000  # Import Lookup Table 1 bit defines ordinals (0x80000000)
                     uc.mem_write(rva_of_hint_name + hdr.base_addr, struct.pack("<I", ordinal))
                     patch_addr.append(ordinal)
                 rva_of_hint_name += 4
@@ -260,16 +261,16 @@ class ImageDump(object):
 
     # TODO Dummy
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
-        #pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
-        #with open(".unipacker_brokenimport.exe", 'rb') as f:
+        # pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
+        # with open(".unipacker_brokenimport.exe", 'rb') as f:
         #    b = f.read()
 
-        #print(dllname_to_functionlist)
+        # print(dllname_to_functionlist)
 
-        #hdr.data_directories[1].VirtualAddress = 0x60000
-        #hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
+        # hdr.data_directories[1].VirtualAddress = 0x60000
+        # hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
 
-        #os.remove(".unipacker_brokenimport.exe")
+        # os.remove(".unipacker_brokenimport.exe")
         return hdr
 
     def chunk_to_image_section_hdr(self, hdr, base_addr, allocated_chunks):
@@ -314,7 +315,8 @@ class ImageDump(object):
         # Set check_space to false if the pe-header was relocated
 
         if check_space:
-            rva_to_section_table = hdr.dos_header.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + len(bytes(_IMAGE_OPTIONAL_HEADER()))
+            rva_to_section_table = hdr.dos_header.e_lfanew + len(bytes(_IMAGE_FILE_HEADER())) + len(
+                bytes(_IMAGE_OPTIONAL_HEADER()))
             number_of_sections = hdr.pe_header.NumberOfSections
             end_of_section_table = rva_to_section_table + len(bytes(IMAGE_SECTION_HEADER())) * number_of_sections
 
@@ -348,7 +350,7 @@ class ImageDump(object):
 
         # Fix SizeOfHeaders
         hdr.opt_header.SizeOfHeaders = alignments(hdr.opt_header.SizeOfHeaders + len(bytes(IMAGE_SECTION_HEADER())),
-                                  hdr.opt_header.FileAlignment)
+                                                  hdr.opt_header.FileAlignment)
 
         return hdr
 
@@ -375,7 +377,9 @@ class ImageDump(object):
         else:
             total_size = sorted(apicall_handler.allocated_chunks)[-1][1] - base_addr
 
-        print(f"Totalsize:{hex(total_size)}, VirtualMemorySize:{hex(virtualmemorysize)}, ach: {apicall_handler.allocated_chunks}")
+        print(f"Totalsize:{hex(total_size)}, "
+              f"VirtualMemorySize:{hex(virtualmemorysize)}, "
+              f"Allocated chunks: {apicall_handler.allocated_chunks}")
 
         try:
             hdr = PE(uc, base_addr)
@@ -401,15 +405,18 @@ class ImageDump(object):
 
         print(f"RVA to import table: {hex(hdr.data_directories[1].VirtualAddress)}")
 
-        if (virtualmemorysize - 0xE000) <= hdr.data_directories[1].VirtualAddress <= virtualmemorysize or len(apicall_handler.allocated_chunks) != 0 or True:
-            print(f"Totalsize:{hex(total_size)}, VirtualMemorySize:{hex(virtualmemorysize)}, ach: {apicall_handler.allocated_chunks}")
-            #print("Relocating Headers to End of Image")
-            #hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
-            #hdr = self.add_section(hdr, '.newhdr', 0x10000, virtualmemorysize-0x10000)
-            #print("Adding new import section")
-            #hdr = self.add_section(hdr, '.nimdata', 0xe000, (virtualmemorysize - 0x10000) + 0x2000)
-            #print("Appending allocated chunks at the end of the image")
-            #hdr = self.chunk_to_image_section_hdr(hdr, base_addr, apicall_handler.allocated_chunks)
+        if (virtualmemorysize - 0xE000) <= hdr.data_directories[1].VirtualAddress <= virtualmemorysize or len(
+                apicall_handler.allocated_chunks) != 0 or True:
+            print(f"Totalsize:{hex(total_size)}, "
+                  f"VirtualMemorySize:{hex(virtualmemorysize)}, "
+                  f"Allocated chunks: {apicall_handler.allocated_chunks}")
+            # print("Relocating Headers to End of Image")
+            # hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
+            # hdr = self.add_section(hdr, '.newhdr', 0x10000, virtualmemorysize-0x10000)
+            # print("Adding new import section")
+            # hdr = self.add_section(hdr, '.nimdata', 0xe000, (virtualmemorysize - 0x10000) + 0x2000)
+            # print("Appending allocated chunks at the end of the image")
+            # hdr = self.chunk_to_image_section_hdr(hdr, base_addr, apicall_handler.allocated_chunks)
             # TODO Fix chunk unmapped space with 0
         else:
             virtualmemorysize -= 0x10000
