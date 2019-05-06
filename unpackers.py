@@ -16,6 +16,7 @@ class DefaultUnpacker(object):
         r2.quit()
         self.allowed_sections = [s["name"] for s in self.secs if
                                  "vaddr" in s and "name" in s and s["vaddr"] <= ep < s["vaddr"] + s["vsize"]]
+        self.section_hopping_control = len(self.allowed_sections) > 0
         self.dumper = ImageDump()
         self.write_execute_control = False
         self.BASE_ADDR = None
@@ -194,6 +195,7 @@ class MEWUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = []
+        self.section_hopping_control = True
         self.dumper = MEWDump()
 
     def is_allowed(self, address):
