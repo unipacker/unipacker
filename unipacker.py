@@ -3,23 +3,22 @@ import re
 import struct
 import sys
 import threading
-import yara
 from cmd import Cmd
 from random import choice
 from time import sleep, time
 
 import pefile
 import r2pipe
+import yara
 from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
 from headers import print_all_headers, print_dos_header, print_pe_header, print_opt_header, print_section_table, PE, \
-    get_imp, pe_write
+    pe_write
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, get_string, convert_to_string
-
 
 state = None
 
@@ -238,7 +237,6 @@ Show current breakpoints:   b"""
             if x in mapping.keys():
                 mapping[x](state.uc, state.BASE_ADDR)
 
-
     def do_dump(self, args):
         """Dump the emulated memory to file.
 
@@ -261,7 +259,6 @@ Stack space and memory not belonging to the image address space is not dumped.""
     def do_onlydmp(self, args):
         args = args or "dump"
         pe_write(state.uc, state.BASE_ADDR, state.virtualmemorysize, args)
-
 
     def do_i(self, args):
         """Get status information
@@ -882,7 +879,6 @@ def setup_processinfo():
     kernelbase_payload = bytes(kernelbase_entry)
     kernel32_payload = bytes(kernel32_entry)
 
-
     state.uc.mem_map(state.TEB_BASE, align(0x5000))
     state.uc.mem_write(state.TEB_BASE, teb_payload)
     state.uc.mem_write(state.PEB_BASE, peb_payload)
@@ -955,15 +951,20 @@ def init_uc():
     new_pe = PE(state.uc, state.BASE_ADDR)
     prot_val = lambda x, y: True if x & y != 0 else False
     for s in new_pe.section_list:
-        atn[(s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.VirtualSize)] = convert_to_string(s.Name)
-        ntp[convert_to_string(s.Name)] = (prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000), prot_val(s.Characteristics, 0x80000000))
+        atn[(
+        s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.VirtualSize)] = convert_to_string(
+            s.Name)
+        ntp[convert_to_string(s.Name)] = (
+        prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000),
+        prot_val(s.Characteristics, 0x80000000))
 
     # for s in pe.sections:
     #    atn[(s.VirtualAddress + state.BASE_ADDR, s.VirtualAddress + state.BASE_ADDR + s.Misc_VirtualSize)] = s.Name
     #    ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
 
     # init syscall handling and prepare hook memory for return values
-    state.apicall_handler = WinApiCalls(state.BASE_ADDR, state.virtualmemorysize, state.HOOK_ADDR, state.breakpoints, state.sample, atn, ntp)
+    state.apicall_handler = WinApiCalls(state.BASE_ADDR, state.virtualmemorysize, state.HOOK_ADDR, state.breakpoints,
+                                        state.sample, atn, ntp)
     state.uc.mem_map(state.HOOK_ADDR, 0x1000)
     state.unpacker.secs += [{"name": "hooks", "vaddr": state.HOOK_ADDR, "vsize": 0x1000}]
     hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', state.HOOK_ADDR) + bytes.fromhex(
@@ -982,16 +983,14 @@ def init_uc():
     hdr = PE(state.uc, state.BASE_ADDR)
 
     # TODO below new version but needs testing as it is crashing
-    #import_table = get_imp(state.uc, hdr.data_directories[1].VirtualAddress, state.BASE_ADDR, hdr.data_directories[1].Size, True)
-    #for lib in import_table:
+    # import_table = get_imp(state.uc, hdr.data_directories[1].VirtualAddress, state.BASE_ADDR, hdr.data_directories[1].Size, True)
+    # for lib in import_table:
     #    for func_name, func_addr in lib.imports:
     #        func_name = func_name if func_name is not None else f"no name: 0x{func_addr:02x}"
     #        dll_name = lib.Name if lib.Name is not None else "-- unknown --"
     #        imports.add(func_name)
     #        curr_hook_addr = state.apicall_handler.add_hook(state.uc, func_name, dll_name)
     #        state.uc.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
-
-
 
     # Patch DLLs with hook
     # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll
@@ -1006,7 +1005,6 @@ def init_uc():
     state.apicall_handler.add_hook(state.uc, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
     state.apicall_handler.add_hook(state.uc, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
     state.apicall_handler.add_hook(state.uc, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
-
 
     # Add hooks
     state.uc.hook_add(UC_HOOK_CODE, hook_code)

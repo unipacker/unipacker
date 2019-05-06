@@ -1,5 +1,7 @@
+import collections
 import struct
 from inspect import signature
+
 from ctypes import *
 import collections
 import pefile

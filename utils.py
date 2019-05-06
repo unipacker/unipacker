@@ -1,6 +1,7 @@
-import struct
-import pefile
 import string
+import struct
+
+import pefile
 import random
 
 def print_cols(lines):
@@ -35,9 +36,9 @@ def alignments(value, multiple_of):
     if value <= multiple_of:
         return multiple_of
     c = 1
-    while value > multiple_of*c:
+    while value > multiple_of * c:
         c += 1
-    return multiple_of*c
+    return multiple_of * c
 
 
 def remove_range(old_range, to_remove):
@@ -63,6 +64,7 @@ def convert_to_string(b):
         return b.rstrip(b'\x00').decode('ascii')
     except UnicodeDecodeError:
         return str(hex(int.from_bytes(b, "little")))
+
 
 
 def get_string2(ptr, uc):
