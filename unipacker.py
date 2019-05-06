@@ -642,9 +642,11 @@ details on this representation)"""
 
 class UnpackerEngine(object):
 
-    def __init__(self, state):
+    def __init__(self, state, sample, unpacker):
         self.state = state
-        self.state.sample, self.state.unpacker = init_sample()
+        self.state.sample = sample
+        self.state.unpacker = unpacker
+
         self.state.startaddr = self.state.unpacker.get_entrypoint()
         self.state.endaddr, _ = self.state.unpacker.get_tail_jump()
         self.state.write_execute_control = self.state.unpacker.write_execute_control
@@ -1066,7 +1068,8 @@ if __name__ == '__main__':
     with open("banner") as f:
         print(f.read())
 
-    engine = UnpackerEngine(state)
+    sample, unpacker = init_sample()
+    engine = UnpackerEngine(state, sample, unpacker)
     shell = Shell(state)
 
     shell.update_prompt(state.startaddr)
