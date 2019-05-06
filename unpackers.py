@@ -196,8 +196,8 @@ class MEWUnpacker(DefaultUnpacker):
         self.allowed_sections = []
         self.dumper = MEWDump()
 
-    def get_allowed_addr_ranges(self):
-        return [(0x400000, 0x400FFF), (0x418000, 0x42F000)]  # TODO For all samples -> custom reader -> remove r2
+    def is_allowed(self, address):
+        return "MEW" not in self.get_section(address)
 
 
     def get_entrypoint(self):
