@@ -18,7 +18,7 @@ from headers import print_all_headers, print_dos_header, print_pe_header, print_
     pe_write
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
-from utils import print_cols, merge, align, remove_range, get_string, convert_to_string
+from utils import print_cols, merge, align, remove_range, convert_to_string, get_reg_values, get_string
 
 state = None
 
@@ -90,6 +90,82 @@ class Shell(Cmd):
     @staticmethod
     def continue_emu():
         state.sync.switch(False)
+
+    @staticmethod
+    def try_parse_address(addr):
+        if addr in state.apicall_handler.hooks:
+            return f"0x{addr:02x} ({state.apicall_handler.hooks[addr]})"
+        return f"0x{addr:02x}"
+
+    def print_regs(self, args=None):
+        reg_values = get_reg_values(state.uc)
+
+        if not args:
+            regs = reg_values.keys()
+        else:
+            regs = map(lambda r: r.lower(), args)
+
+        for reg in regs:
+            print(f"{reg.upper()} = 0x{reg_values[reg]:02x}")
+
+    def print_mem(self, base, num_elements, t="int", base_alias=""):
+        if not base_alias:
+            base_alias = f"0x{base:02x}"
+
+        string = None
+        if t == "str":
+            string = get_string(base, state.uc)
+            t = "byte"
+            num_elements = len(string)
+
+        types = {
+            "byte": ("B", 1),
+            "int": ("<I", 4)
+        }
+        fmt, size = types[t]
+        for i in range(num_elements):
+            item, = struct.unpack(fmt, state.uc.mem_read(base + i * size, size))
+            print(f"{base_alias}+{i * 4} = 0x{item:02x}")
+
+        if string is not None:
+            print(f"String @0x{base:02x}: {string}")
+
+    def print_stack(self, elements):
+        esp = state.uc.reg_read(UC_X86_REG_ESP)
+        self.print_mem(state.uc, esp, elements, base_alias="ESP")
+
+    def print_imports(self, args):
+        lines_static = []
+        lines_dynamic = []
+
+        for addr, name in state.apicall_handler.hooks.items():
+            try:
+                module = state.apicall_handler.module_for_function[name]
+            except KeyError:
+                module = "?"
+            if name in state.imports:
+                lines_static += [(f"0x{addr:02x}", name, module)]
+            else:
+                lines_dynamic += [(f"0x{addr:02x}", name, module)]
+
+        print("\n\x1b[31mStatic imports:\x1b[0m")
+        print_cols(lines_static)
+        print("\n\x1b[31mDynamic imports:\x1b[0m")
+        print_cols(lines_dynamic)
+
+    def print_stats(self):
+        duration = time() - state.start
+        hours, rest = divmod(duration, 3600)
+        minutes, seconds = divmod(rest, 60)
+        print(f"\x1b[31mTime wasted emulating:\x1b[0m {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
+        print("\x1b[31mAPI calls:\x1b[0m")
+        print_cols([(name, amount) for name, amount in state.api_calls.items()])
+        print("\n\x1b[31mInstructions executed in sections:\x1b[0m")
+        print_cols([(name, amount) for name, amount in state.sections_executed.items()])
+        print("\n\x1b[31mRead accesses:\x1b[0m")
+        print_cols([(name, amount) for name, amount in state.sections_read.items()])
+        print("\n\x1b[31mWrite accesses:\x1b[0m")
+        print_cols([(name, amount) for name, amount in state.sections_written.items()])
 
     def __init__(self):
         super().__init__()
@@ -192,7 +268,7 @@ Show current breakpoints:   b"""
             self.print_breakpoints()
 
     def print_breakpoints(self):
-        current_breakpoints = list(map(try_parse_address, state.breakpoints))
+        current_breakpoints = list(map(self.try_parse_address, state.breakpoints))
         current_breakpoints += list(map(lambda b: f'{b} (pending)', state.apicall_handler.pending_breakpoints))
         print(f"Current breakpoints: {current_breakpoints}")
         current_mem_breakpoints = []
@@ -270,10 +346,10 @@ Show imports:               i i
 Static and dynamic imports are shown with their respective stub addresses in the loaded image"""
         info, *params = args.split(" ")
         mapping = {
-            "r": print_regs,
-            "registers": print_regs,
-            "i": print_imports,
-            "imports": print_imports
+            "r": self.print_regs,
+            "registers": self.print_regs,
+            "i": self.print_imports,
+            "imports": self.print_imports
         }
         if info in mapping:
             mapping[info](params)
@@ -308,7 +384,7 @@ Location:   address (decimal or hexadecimal form) or a $-prefixed register name 
                 alias = ""
                 addr = int(addr, 0)
 
-            print_mem(state.uc, addr, n, t, alias)
+            self.print_mem(state.uc, addr, n, t, alias)
         except Exception as e:
             print(f"Error parsing command: {e}")
 
@@ -522,7 +598,7 @@ Options:
     def do_stats(self, args):
         """Print emulation statistics: In which section are the instructions located that were executed, which
 sections have been read from and which have been written to"""
-        print_stats()
+        self.print_stats()
 
     def do_yara(self, args):
         """Run YARA rules against the sample
@@ -564,12 +640,6 @@ details on this representation)"""
         shell.prompt = f"\x1b[33m[0x{addr:02x}]> \x1b[0m"
 
 
-def try_parse_address(addr):
-    if addr in state.apicall_handler.hooks:
-        return f"0x{addr:02x} ({state.apicall_handler.hooks[addr]})"
-    return f"0x{addr:02x}"
-
-
 def getVirtualMemorySize():
     r2 = r2pipe.open(state.sample)
     sections = r2.cmdj("iSj")
@@ -589,96 +659,6 @@ def getVirtualMemorySize():
 
 def entrypoint(pe):
     return pe.OPTIONAL_HEADER.AddressOfEntryPoint + pe.OPTIONAL_HEADER.ImageBase
-
-
-def get_reg_values():
-    return {
-        "eax": state.uc.reg_read(UC_X86_REG_EAX),
-        "ebx": state.uc.reg_read(UC_X86_REG_EBX),
-        "ecx": state.uc.reg_read(UC_X86_REG_ECX),
-        "edx": state.uc.reg_read(UC_X86_REG_EDX),
-        "eip": state.uc.reg_read(UC_X86_REG_EIP),
-        "esp": state.uc.reg_read(UC_X86_REG_ESP),
-        "efl": state.uc.reg_read(UC_X86_REG_EFLAGS),
-        "edi": state.uc.reg_read(UC_X86_REG_EDI),
-        "esi": state.uc.reg_read(UC_X86_REG_ESI),
-        "ebp": state.uc.reg_read(UC_X86_REG_EBP)
-    }
-
-
-def print_regs(args=None):
-    reg_values = get_reg_values()
-
-    if not args:
-        regs = reg_values.keys()
-    else:
-        regs = map(lambda r: r.lower(), args)
-
-    for reg in regs:
-        print(f"{reg.upper()} = 0x{reg_values[reg]:02x}")
-
-
-def print_mem(uc, base, num_elements, t="int", base_alias=""):
-    if not base_alias:
-        base_alias = f"0x{base:02x}"
-
-    string = None
-    if t == "str":
-        string = get_string(base, uc)
-        t = "byte"
-        num_elements = len(string)
-
-    types = {
-        "byte": ("B", 1),
-        "int": ("<I", 4)
-    }
-    fmt, size = types[t]
-    for i in range(num_elements):
-        item, = struct.unpack(fmt, uc.mem_read(base + i * size, size))
-        print(f"{base_alias}+{i * 4} = 0x{item:02x}")
-
-    if string is not None:
-        print(f"String @0x{base:02x}: {string}")
-
-
-def print_stack(uc, elements):
-    esp = uc.reg_read(UC_X86_REG_ESP)
-    print_mem(uc, esp, elements, base_alias="ESP")
-
-
-def print_imports(args):
-    lines_static = []
-    lines_dynamic = []
-
-    for addr, name in state.apicall_handler.hooks.items():
-        try:
-            module = state.apicall_handler.module_for_function[name]
-        except KeyError:
-            module = "?"
-        if name in state.imports:
-            lines_static += [(f"0x{addr:02x}", name, module)]
-        else:
-            lines_dynamic += [(f"0x{addr:02x}", name, module)]
-
-    print("\n\x1b[31mStatic imports:\x1b[0m")
-    print_cols(lines_static)
-    print("\n\x1b[31mDynamic imports:\x1b[0m")
-    print_cols(lines_dynamic)
-
-
-def print_stats():
-    duration = time() - state.start
-    hours, rest = divmod(duration, 3600)
-    minutes, seconds = divmod(rest, 60)
-    print(f"\x1b[31mTime wasted emulating:\x1b[0m {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
-    print("\x1b[31mAPI calls:\x1b[0m")
-    print_cols([(name, amount) for name, amount in state.api_calls.items()])
-    print("\n\x1b[31mInstructions executed in sections:\x1b[0m")
-    print_cols([(name, amount) for name, amount in state.sections_executed.items()])
-    print("\n\x1b[31mRead accesses:\x1b[0m")
-    print_cols([(name, amount) for name, amount in state.sections_read.items()])
-    print("\n\x1b[31mWrite accesses:\x1b[0m")
-    print_cols([(name, amount) for name, amount in state.sections_written.items()])
 
 
 def hook_code(uc, address, size, user_data):
@@ -791,9 +771,9 @@ def emu():
 
         # Result of the emulation
         print(">>> Emulation done. Below is the CPU context")
-        print_regs()
+        shell.print_regs()  # TODO put into callback
         print()
-        print_stats()
+        shell.print_stats()  # TODO put into callback
     except UcError as e:
         print(f"Error: {e}")
         state.unpacker.dump(state.uc, state.apicall_handler)

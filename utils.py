@@ -1,8 +1,11 @@
 import random
 import string
 import struct
+from time import time
 
 import pefile
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EIP, \
+    UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
 
 
 def print_cols(lines):
@@ -132,3 +135,18 @@ class ImportValues(object):
 
 class InvalidPEFile(Exception):
     pass
+
+
+def get_reg_values(uc):
+    return {
+        "eax": uc.reg_read(UC_X86_REG_EAX),
+        "ebx": uc.reg_read(UC_X86_REG_EBX),
+        "ecx": uc.reg_read(UC_X86_REG_ECX),
+        "edx": uc.reg_read(UC_X86_REG_EDX),
+        "eip": uc.reg_read(UC_X86_REG_EIP),
+        "esp": uc.reg_read(UC_X86_REG_ESP),
+        "efl": uc.reg_read(UC_X86_REG_EFLAGS),
+        "edi": uc.reg_read(UC_X86_REG_EDI),
+        "esi": uc.reg_read(UC_X86_REG_ESI),
+        "ebp": uc.reg_read(UC_X86_REG_EBP)
+    }
