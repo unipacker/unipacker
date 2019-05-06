@@ -190,7 +190,6 @@ class YZPackUnpacker(DefaultUnpacker):
         return sys.maxsize, None
 
 
-# TODO Not Allowed addr ranges -> Blacklist
 class MEWUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
