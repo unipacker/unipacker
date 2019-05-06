@@ -189,7 +189,7 @@ class YZPackUnpacker(DefaultUnpacker):
     def get_tail_jump(self):
         return sys.maxsize, None
 
-# TODO Not Allowed addr ranges -> Blacklist
+
 class MEWUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
@@ -198,7 +198,6 @@ class MEWUnpacker(DefaultUnpacker):
 
     def is_allowed(self, address):
         return "MEW" not in self.get_section(address)
-
 
     def get_entrypoint(self):
         return None
