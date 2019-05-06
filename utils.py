@@ -65,26 +65,13 @@ def convert_to_string(b):
         return str(hex(int.from_bytes(b, "little")))
 
 
-def get_string2(ptr, uc):
-    printable_chars = bytes(string.printable, 'ascii')
-    buf = b''
-    i = 0
-    while True:
-        b = uc.mem_read(ptr + i, 1)
-        if b in printable_chars:
-            buf += b
-            i += 1
-        else:
-            break
-    return buf if len(buf) != 0 else None
-
-
-def get_string(ptr, uc):
+def get_string(ptr, uc, break_on_unprintable=False):
+    printable_chars = bytes(string.printable, "ascii")
     buf = ""
     i = 0
     while True:
         item, = struct.unpack("c", uc.mem_read(ptr + i, 1))
-        if item == b"\x00":
+        if item == b"\x00" or (break_on_unprintable and item not in printable_chars):
             break
         buf += chr(item[0])
         i += 1

@@ -380,7 +380,7 @@ class WinApiCalls(object):
 
     @api_call()
     def QueryPerformanceCounter(self, uc, esp, log, ptr):
-        ticks = time.perf_counter() * (10**9)
+        ticks = int(time.perf_counter() * (10**9))
         uc.mem_write(ptr, struct.pack("<Q", ticks))
         log and print(f"QueryPerformanceCounter: {ticks} ticks")
 

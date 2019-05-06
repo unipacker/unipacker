@@ -5,7 +5,7 @@ from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HE
 from ctypes import *
 from datetime import datetime
 import struct
-from utils import InvalidPEFile, get_string, ImportValues, get_string2
+from utils import InvalidPEFile, ImportValues
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -150,14 +150,14 @@ def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
         imp_struct_list.append(imp_struct)
         if read_values:
             try:
-                dll_name = get_string2(getattr(imp_struct, "Name") + base_addr, uc)
+                dll_name = get_string(getattr(imp_struct, "Name") + base_addr, uc, break_on_unprintable=True)
                 imp_names = []
                 rva_to_iat = getattr(imp_struct, "FirstThunk")
                 while True:
                     new_val = struct.unpack("<I", uc.mem_read(base_addr+rva_to_iat, 4))[0]
                     if new_val == 0:
                         break
-                    imp_name = (get_string2(new_val + 2 + base_addr, uc), rva_to_iat)
+                    imp_name = (get_string(new_val + 2 + base_addr, uc, break_on_unprintable=True), rva_to_iat)
                     imp_names.append(imp_name)
                     rva_to_iat += 4
 
