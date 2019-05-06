@@ -20,12 +20,10 @@ from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
 from utils import print_cols, merge, align, remove_range, convert_to_string, get_reg_values, get_string
 
-state = None
-
 
 class State(object):
 
-    def __init__(self, sync):
+    def __init__(self):
         self.imports = set()
         self.uc = None
         self.sample = None
@@ -64,30 +62,75 @@ class State(object):
         self.api_calls = {}  # TODO rename to apicall_counter
 
         self.start = 0
-        self.sync = sync
 
 
-class Sync(object):
+class UnpackerClient(object):
+
+    def emu_started(self):
+        pass
+
+    def emu_paused(self):
+        pass
+
+    def emu_resumed(self):
+        pass
+
+    def emu_done(self):
+        pass
+
+    def address_updated(self, address):
+        pass
+
+
+class Shell(Cmd, UnpackerClient):
 
     def __init__(self):
-        self.emulator_event = threading.Event()
-        self.client_event = threading.Event()
+        super().__init__()
+        with open("banner") as f:
+            print(f.read())
 
-    def switch(self, is_client):
-        if is_client:
-            self.client_event.clear()
-            self.emulator_event.set()
-            self.client_event.wait()
-        else:
-            self.emulator_event.clear()
-            self.client_event.set()
-            self.emulator_event.wait()
+        self.init_engine()
 
+        threading.Thread(target=self.cmdloop).start()
 
-class Shell(Cmd):
+    def init_engine(self):
+        self.started = False
+        self.rules = None
+        self.address = None
+        self.state = State()
+        self.shell_event = threading.Event()
+        sample, unpacker = init_sample()
+        self.engine = UnpackerEngine(self.state, sample, unpacker)
+        self.engine.register_client(self)
+        self.address_updated(self.state.startaddr)
 
-    def continue_emu(self):
-        self.state.sync.switch(False)
+    def emu_started(self):
+        self.started = True
+
+    def emu_paused(self):
+        self.shell_event.set()
+
+    def emu_resumed(self):
+        pass
+
+    def emu_done(self):
+        self.started = False
+        print("Emulation is done. CPU context:")
+        self.print_regs()
+        print()
+        self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
+        print()
+        self.print_stats()
+        self.shell_event.set()
+
+    def address_updated(self, address):
+        self.address = address
+        self.prompt = f"\x1b[33m[0x{address:02x}]> \x1b[0m"
+
+    def continue_emu(self, single_instruction=False):
+        self.shell_event.clear()
+        self.engine.resume(single_instruction)
+        self.shell_event.wait()
 
     def try_parse_address(self, addr):
         if addr in self.state.apicall_handler.hooks:
@@ -163,13 +206,6 @@ class Shell(Cmd):
         print_cols([(name, amount) for name, amount in self.state.sections_read.items()])
         print("\n\x1b[31mWrite accesses:\x1b[0m")
         print_cols([(name, amount) for name, amount in self.state.sections_written.items()])
-
-    def __init__(self, state):
-        super().__init__()
-        self.state = state
-        self.emu_started = False
-        self.rules = None
-        self.address = None
 
     def do_aaa(self, args):
         """Analyze absolutely all: Show a collection of stats about the current sample"""
@@ -283,9 +319,7 @@ Show current breakpoints:   b"""
 
     def do_c(self, args):
         """Continue emulation. If it hasn't been started yet, it will act the same as 'r'"""
-        with self.state.data_lock:
-            self.state.single_instruction = False
-        if self.emu_started:
+        if self.started:
             self.continue_emu()
         else:
             print("Emulation not started yet. Starting now...")
@@ -465,13 +499,13 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
 
     def do_r(self, args):
         """Start execution"""
-        if self.emu_started:
+        if self.started:
             print("Emulation already started. Interpreting as 'c'")
             self.do_c(args)
             return
-        self.emu_started = True
-        threading.Thread(target=engine.emu).start()
-        self.state.sync.switch(True)
+        self.shell_event.clear()
+        threading.Thread(target=self.engine.emu).start()
+        self.shell_event.wait()
 
     def do_detect(self, args):
         """Stop emulation if certain states are detected.
@@ -492,27 +526,15 @@ Options:
 
     def do_rst(self, args):
         """Close the current sample and start at the initial file choosing prompt again."""
-        if self.emu_started:
+        if self.started:
             self.state.uc.emu_stop()
-            self.state.sync.switch(True)
         print("")
-        init_sample(False)
-        engine.init_uc()
-        self.emu_started = False
-        self.state.sections_read = {}
-        self.state.sections_written = {}
-        self.state.write_targets = []
-        self.state.sections_executed = {}
-        self.state.api_calls = {}
-        self.state.single_instruction = False
-        self.update_prompt(self.state.startaddr)
+        self.init_engine()
 
     def do_s(self, args):
         """Execute a single instruction and return to the shell"""
-        with self.state.data_lock:
-            self.state.single_instruction = True
-        if self.emu_started:
-            self.continue_emu()
+        if self.started:
+            self.continue_emu(single_instruction=True)
         else:
             print("Emulation not started yet. Starting now...")
             self.do_r(args)
@@ -623,9 +645,10 @@ details on this representation)"""
 
     def do_exit(self, args):
         """Exit un{i}packer"""
-        if self.emu_started:
-            self.state.uc.emu_stop()
-            self.state.sync.switch(True)
+        if self.started:
+            self.shell_event.clear()
+            self.engine.stop()
+            self.shell_event.wait()
         with open("fortunes") as f:
             fortunes = f.read().splitlines()
         print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
@@ -635,10 +658,6 @@ details on this representation)"""
         """Exit un{i}packer by pressing ^D"""
         self.do_exit(args)
 
-    def update_prompt(self, addr):
-        self.address = addr
-        shell.prompt = f"\x1b[33m[0x{addr:02x}]> \x1b[0m"
-
 
 class UnpackerEngine(object):
 
@@ -646,6 +665,10 @@ class UnpackerEngine(object):
         self.state = state
         self.state.sample = sample
         self.state.unpacker = unpacker
+        self.clients = []
+
+        self.emulator_event = threading.Event()
+        self.single_instruction = False
 
         self.state.startaddr = self.state.unpacker.get_entrypoint()
         self.state.endaddr, _ = self.state.unpacker.get_tail_jump()
@@ -653,6 +676,33 @@ class UnpackerEngine(object):
         self.state.section_hopping_control = self.state.unpacker.section_hopping_control
 
         self.init_uc()
+
+    def register_client(self, client):
+        self.clients += [client]
+
+    def pause(self):
+        for client in self.clients:
+            client.emu_paused()
+        self.emulator_event.clear()
+        self.emulator_event.wait()
+
+    def stop(self):
+        self.state.uc.emu_stop()
+        self.emulator_event.set()
+
+    def stopped(self):
+        for client in self.clients:
+            client.emu_done()
+
+    def resume(self, single_instruction=False):
+        self.single_instruction = single_instruction
+        for client in self.clients:
+            client.emu_resumed()
+        self.emulator_event.set()
+
+    def update_address(self, address):
+        for client in self.clients:
+            client.address_updated(address)
 
     def getVirtualMemorySize(self):
         r2 = r2pipe.open(self.state.sample)
@@ -674,27 +724,25 @@ class UnpackerEngine(object):
         return pe.OPTIONAL_HEADER.AddressOfEntryPoint + pe.OPTIONAL_HEADER.ImageBase
 
     def hook_code(self, uc, address, size, user_data):
-        shell.update_prompt(address)
-        if not self.state.sync.emulator_event.is_set():
-            self.state.sync.client_event.set()  # previous command is finished, shell can start again
-        self.state.sync.emulator_event.wait()
+        self.update_address(address)
+        self.emulator_event.wait()
 
         with self.state.data_lock:
             breakpoint_hit = address in self.state.breakpoints
         if breakpoint_hit:
             print("\x1b[31mBreakpoint hit!\x1b[0m")
-            self.pause_emu()
+            self.pause()
         if address == self.state.endaddr:
             print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
             self.state.unpacker.dump(uc, self.state.apicall_handler)
-            self.pause_emu()
+            self.pause()
 
         if self.state.write_execute_control and address not in self.state.apicall_handler.hooks and (
                 address < self.state.HOOK_ADDR or address > self.state.HOOK_ADDR + 0x1000):
             if any(lower <= address <= upper for (lower, upper) in sorted(self.state.write_targets)):
                 print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
                 self.state.unpacker.dump(uc, self.state.apicall_handler)
-                self.pause_emu()
+                self.pause()
 
         if self.state.section_hopping_control and address not in self.state.apicall_handler.hooks and address - 0x7 not in self.state.apicall_handler.hooks and (
                 address < self.state.HOOK_ADDR or address > self.state.HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
@@ -703,7 +751,7 @@ class UnpackerEngine(object):
                 print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
                 self.state.unpacker.allow(address)
                 self.state.unpacker.dump(uc, self.state.apicall_handler)
-                self.pause_emu()
+                self.pause()
 
         curr_section = self.state.unpacker.get_section(address)
         if curr_section not in self.state.sections_executed:
@@ -724,12 +772,9 @@ class UnpackerEngine(object):
                 uc.mem_write(self.state.HOOK_ADDR, struct.pack("<I", ret))
             uc.reg_write(UC_X86_REG_ESP, esp)
         self.state.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
-        with self.state.data_lock:
-            if self.state.single_instruction:
-                self.state.sync.emulator_event.clear()
 
-    def pause_emu(self):
-        self.state.sync.switch(False)
+        if self.single_instruction:
+            self.pause()
 
     # Method is executed before memory access
     def hook_mem_access(self, uc, access, address, size, value, user_data):
@@ -758,7 +803,7 @@ class UnpackerEngine(object):
                     print(f"Unexpected mem access type {access_type}, addr: 0x{address:02x}")
         if any(lower <= address <= upper for lower, upper in self.state.mem_breakpoints):
             print(f"\x1b[31mMemory breakpoint hit! Access {access_type} to 0x{address:02x}")
-            self.pause_emu()
+            self.pause()
 
     def hook_mem_invalid(self, uc, access, address, size, value, user_data):
         for access_name, val in unicorn_const.__dict__.items():
@@ -769,6 +814,9 @@ class UnpackerEngine(object):
 
     def emu(self):
         try:
+            for client in self.clients:
+                client.emu_started()
+            self.emulator_event.set()
             self.state.start = time()
             if self.state.endaddr == sys.maxsize:
                 print(f"Emulation starting at {hex(self.state.startaddr)}")
@@ -776,23 +824,11 @@ class UnpackerEngine(object):
                 print(f"Emulation starting. Bounds: from {hex(self.state.startaddr)} to {hex(self.state.endaddr)}")
             # Start emulation from self.state.startaddr
             self.state.uc.emu_start(self.state.startaddr, sys.maxsize)
-
-            # Result of the emulation
-            print(">>> Emulation done. Below is the CPU context")
-            shell.print_regs()  # TODO put into callback
-            print()
-            shell.print_stats()  # TODO put into callback
         except UcError as e:
             print(f"Error: {e}")
-            self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
-            self.state.sync.emulator_event.clear()
-            shell.emu_started = False
-            self.state.sync.client_event.set()
         finally:
-            self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
-            self.state.sync.emulator_event.clear()
-            shell.emu_started = False
-            self.state.sync.client_event.set()
+            self.stopped()
+            self.emulator_event.clear()
 
     def setup_processinfo(self):
         self.state.TEB_BASE = 0x200000
@@ -1064,13 +1100,4 @@ def init_sample(show_fortune=True):
 
 
 if __name__ == '__main__':
-    state = State(Sync())
-    with open("banner") as f:
-        print(f.read())
-
-    sample, unpacker = init_sample()
-    engine = UnpackerEngine(state, sample, unpacker)
-    shell = Shell(state)
-
-    shell.update_prompt(state.startaddr)
-    threading.Thread(target=shell.cmdloop).start()
+    Shell()
