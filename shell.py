@@ -471,6 +471,7 @@ Options:
             self.continue_emu(single_instruction=True)
         else:
             print("Emulation not started yet. Starting now...")
+            self.engine.single_instruction = True
             self.do_r(args)
 
     def do_del(self, args):
