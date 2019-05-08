@@ -135,7 +135,6 @@ class UnpackerEngine(object):
                 total_size += sec['vsize']
         r2.quit()
         total_size += (min_offset - self.state.BASE_ADDR)
-        print(f"Virtualmemorysize: {hex(total_size)}")
 
         return total_size
 
