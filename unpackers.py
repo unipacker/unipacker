@@ -3,7 +3,7 @@ import sys
 import r2pipe
 import yara
 
-from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump
+from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump
 
 
 class DefaultUnpacker(object):
@@ -19,6 +19,7 @@ class DefaultUnpacker(object):
         self.dumper = ImageDump()
         self.write_execute_control = False
         self.BASE_ADDR = None
+        self.allowed_addr_ranges = []
         self.virtualmemorysize = None
 
     def get_tail_jump(self):
@@ -51,7 +52,7 @@ class DefaultUnpacker(object):
         self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, apicall_handler, path)
 
     def is_allowed(self, address):
-        for start, end in self.get_allowed_addr_ranges():
+        for start, end in self.allowed_addr_ranges:
             if start <= address <= end:
                 return True
         return False
@@ -78,6 +79,12 @@ class DefaultUnpacker(object):
                 return s["name"] if "name" in s else "unknown name"
         return "external"
 
+    def get_section_from_addr(self, address):
+        for s in self.secs:
+            if s["vaddr"] <= address < s["vaddr"] + s["vsize"]:
+                return s["vaddr"], s["vaddr"] + s["vsize"]
+        return None, None
+
     def get_section_range(self, section):
         for s in self.secs:
             if "name" in s and s["name"] == section:
@@ -91,6 +98,9 @@ class UPXUnpacker(DefaultUnpacker):
         super().__init__(sample)
         self.jmp_to_oep, self.oep = self.find_tail_jump()
         self.dumper = UPXDump()
+
+    def is_allowed(self, address):
+        return True
 
     def find_tail_jump(self):
         r2 = r2pipe.open(self.sample)
@@ -149,6 +159,7 @@ class ASPackUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = ['.aspack']
+        self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = ASPackDump()
 
     def get_entrypoint(self):
@@ -169,6 +180,7 @@ class FSGUnpacker(DefaultUnpacker):
             if "size" in s and s["size"] > 0:
                 self.allowed_sections += [s["name"]]
         r2.quit()
+        self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
     def get_entrypoint(self):
         return None
@@ -181,6 +193,7 @@ class YZPackUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = ['.yzpack', '.yzpack2']
+        self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = YZPackDump()
 
     def get_entrypoint(self):
@@ -198,6 +211,35 @@ class MEWUnpacker(DefaultUnpacker):
 
     def is_allowed(self, address):
         return "MEW" not in self.get_section(address)
+
+    def get_entrypoint(self):
+        return None
+
+    def get_tail_jump(self):
+        return sys.maxsize, None
+
+class MPRESSUnpacker(DefaultUnpacker):
+    def __init__(self, sample):
+        super().__init__(sample)
+        self.allowed_sections = [".MPRESS2"]
+        self.allowed_addr_ranges = self.get_allowed_addr_ranges()
+        self.dumper = MPRESSDump()
+        self.swap_status = 0
+
+
+    def is_allowed(self, address):
+        if not super().is_allowed(address) and self.swap_status == 0:
+            print(f"Setting swap_status: address: {hex(address)}")
+            self.swap_status = 1
+            section_start, section_end = self.get_section_from_addr(address)
+            self.allowed_addr_ranges = [(address, section_end)]
+            return True
+
+        if not super().is_allowed(address) and self.swap_status == 1:
+            print(f"Allowed Addr Ranges: {hex(self.allowed_addr_ranges[0][0])}, {hex(self.allowed_addr_ranges[0][1])}")
+            return False
+
+        return True
 
     def get_entrypoint(self):
         return None
@@ -224,6 +266,8 @@ def generate_label(l):
         return "petite"
     elif 'mew' in str(l):
         return 'mew'
+    elif 'mpress' in str(l):
+        return 'mpress'
     elif "aspack" in str(l):
         return "aspack"
     elif "fsg" in str(l):
@@ -248,6 +292,7 @@ def get_unpacker(sample):
         "fsg": FSGUnpacker,
         "yzpack": YZPackUnpacker,
         "mew": MEWUnpacker,
+        "mpress": MPRESSUnpacker,
     }
 
     if "pe32" not in str(yara_matches):

@@ -109,3 +109,14 @@ rule yzpack{
     condition:
         pe32 and ($yz or $yz2)
 }
+
+rule mpress{
+    meta:
+        description = "MPRESS packed file"
+        date = "2019-02-28"
+    strings:
+        $mp = ".MPRESS1"
+        $mp2 = ".MPRESS2"
+    condition:
+        pe32 and ($mp or $mp2)
+}
