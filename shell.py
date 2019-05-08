@@ -1,0 +1,594 @@
+import re
+import struct
+import sys
+import threading
+from cmd import Cmd
+from random import choice
+from time import time, sleep
+
+import yara
+from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, \
+    UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
+
+from headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, print_section_table, \
+    pe_write
+from unipacker import UnpackerClient, State, init_sample, UnpackerEngine
+from utils import get_reg_values, get_string, print_cols, merge, remove_range
+
+
+class Shell(Cmd, UnpackerClient):
+
+    def __init__(self):
+        super().__init__()
+        with open("banner") as f:
+            print(f.read())
+
+        self.init_engine()
+
+        threading.Thread(target=self.cmdloop).start()
+
+    def init_engine(self):
+        self.started = False
+        self.rules = None
+        self.address = None
+        self.state = State()
+        self.shell_event = threading.Event()
+        sample, unpacker = init_sample()
+        self.engine = UnpackerEngine(self.state, sample, unpacker)
+        self.engine.register_client(self)
+        self.address_updated(self.state.startaddr)
+
+    def emu_started(self):
+        self.started = True
+
+    def emu_paused(self):
+        self.shell_event.set()
+
+    def emu_resumed(self):
+        pass
+
+    def emu_done(self):
+        self.started = False
+        print("Emulation is done. CPU context:")
+        self.print_regs()
+        print()
+        self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
+        print()
+        self.print_stats()
+        self.shell_event.set()
+
+    def address_updated(self, address):
+        self.address = address
+        self.prompt = f"\x1b[33m[0x{address:02x}]> \x1b[0m"
+
+    def continue_emu(self, single_instruction=False):
+        self.shell_event.clear()
+        self.engine.resume(single_instruction)
+        self.shell_event.wait()
+
+    def try_parse_address(self, addr):
+        if addr in self.state.apicall_handler.hooks:
+            return f"0x{addr:02x} ({self.state.apicall_handler.hooks[addr]})"
+        return f"0x{addr:02x}"
+
+    def print_regs(self, args=None):
+        reg_values = get_reg_values(self.state.uc)
+
+        if not args:
+            regs = reg_values.keys()
+        else:
+            regs = map(lambda r: r.lower(), args)
+
+        for reg in regs:
+            print(f"{reg.upper()} = 0x{reg_values[reg]:02x}")
+
+    def print_mem(self, base, num_elements, t="int", base_alias=""):
+        if not base_alias:
+            base_alias = f"0x{base:02x}"
+
+        string = None
+        if t == "str":
+            string = get_string(base, self.state.uc)
+            t = "byte"
+            num_elements = len(string)
+
+        types = {
+            "byte": ("B", 1),
+            "int": ("<I", 4)
+        }
+        fmt, size = types[t]
+        for i in range(num_elements):
+            item, = struct.unpack(fmt, self.state.uc.mem_read(base + i * size, size))
+            print(f"{base_alias}+{i * 4} = 0x{item:02x}")
+
+        if string is not None:
+            print(f"String @0x{base:02x}: {string}")
+
+    def print_stack(self, elements):
+        esp = self.state.uc.reg_read(UC_X86_REG_ESP)
+        self.print_mem(self.state.uc, esp, elements, base_alias="ESP")
+
+    def print_imports(self, args):
+        lines_static = []
+        lines_dynamic = []
+
+        for addr, name in self.state.apicall_handler.hooks.items():
+            try:
+                module = self.state.apicall_handler.module_for_function[name]
+            except KeyError:
+                module = "?"
+            if name in self.state.imports:
+                lines_static += [(f"0x{addr:02x}", name, module)]
+            else:
+                lines_dynamic += [(f"0x{addr:02x}", name, module)]
+
+        print("\n\x1b[31mStatic imports:\x1b[0m")
+        print_cols(lines_static)
+        print("\n\x1b[31mDynamic imports:\x1b[0m")
+        print_cols(lines_dynamic)
+
+    def print_stats(self):
+        duration = time() - self.state.start
+        hours, rest = divmod(duration, 3600)
+        minutes, seconds = divmod(rest, 60)
+        print(f"\x1b[31mTime wasted emulating:\x1b[0m {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
+        print("\x1b[31mAPI calls:\x1b[0m")
+        print_cols([(name, amount) for name, amount in self.state.apicall_counter.items()])
+        print("\n\x1b[31mInstructions executed in sections:\x1b[0m")
+        print_cols([(name, amount) for name, amount in self.state.sections_executed.items()])
+        print("\n\x1b[31mRead accesses:\x1b[0m")
+        print_cols([(name, amount) for name, amount in self.state.sections_read.items()])
+        print("\n\x1b[31mWrite accesses:\x1b[0m")
+        print_cols([(name, amount) for name, amount in self.state.sections_written.items()])
+
+    def do_aaa(self, args):
+        """Analyze absolutely all: Show a collection of stats about the current sample"""
+        print("\x1b[31mFile analysis:\x1b[0m")
+        print_cols([
+            ("YARA:", ", ".join(map(str, self.state.yara_matches))),
+            ("Chosen unpacker:", self.state.unpacker.__class__.__name__),
+            ("Allowed sections:", ', '.join(self.state.unpacker.allowed_sections)),
+            ("End of unpacking stub:",
+             f"0x{self.state.endaddr:02x}" if self.state.endaddr != sys.maxsize else "unknown"),
+            ("Section hopping detection:", "active" if self.state.section_hopping_control else "inactive"),
+            ("Write+Exec detection:", "active" if self.state.write_execute_control else "inactive")
+        ])
+        print("\n\x1b[31mPE stats:\x1b[0m")
+        print_cols([
+            ("Declared virtual memory size:", f"0x{self.state.virtualmemorysize:02x}", "", ""),
+            ("Actual loaded image size:", f"0x{len(self.state.loaded_image):02x}", "", ""),
+            ("Image base address:", f"0x{self.state.BASE_ADDR:02x}", "", ""),
+            ("Mapped stack space:", f"0x{self.state.STACK_ADDR:02x}", "-",
+             f"0x{self.state.STACK_ADDR + self.state.STACK_SIZE:02x}"),
+            ("Mapped hook space:", f"0x{self.state.HOOK_ADDR:02x}", "-", f"0x{self.state.HOOK_ADDR + 0x1000:02x}")
+        ])
+        self.do_i("i")
+        print("\n\x1b[31mRegister status:\x1b[0m")
+        self.do_i("r")
+
+    def do_aaaa(self, args):
+        """The version of aaa for people in a hurry: We know you don't want to waste your time staring at
+boring static information. 'Auto-aaa' lets you get your hands dirty with emulation after
+a quick glance at sample infos, without having to type 'r' yourself"""
+        self.do_aaa(args)
+        if any([self.state.log_instr, self.state.log_mem_read, self.state.log_mem_write]):
+            sleep(2)
+        self.do_r(args)
+
+    def do_b(self, args):
+        """Set breakpoints. All of the options below can be combined in one command any number of times
+
+Code breakpoint:            b <address> [<addr2> ...]
+    Classic breakpoint: Emulation will stop before executing the instruction at the given
+    address.
+
+API call breakpoint:        b $<api_call_name>
+    Special case of code breakpoint: Stop the emulation when a certain API call is being made.
+    If this function has been declared in the sample's import table, the breakpoint will be set
+    instantly. If this function will be called in the future, but is somehow not known at the
+    moment (dynamically resolved via GetProcAddress), we will still stop the execution on
+    call. But until GetProcAddress is instructed to return the address of this function, the
+    breakpoint will be marked as 'pending'. At this point we create a hook for the function
+    and mark it as a normal breakpoint.
+
+Memory breakpoint:          b m<address>[-<upper_limit>] ...
+    When prefixing the address with an 'm', emulation will stop when this address is being
+    read from or written to. Optionally you can set the breakpoint to watch over a whole
+    range of memory, e.g. b m0x100-0x200.
+
+Stack breakpoint:           b stack
+    Special case of memory range breakpoint: watches the whole stack space
+
+Show current breakpoints:   b"""
+        code_targets = []
+        mem_targets = []
+        for arg in args.split(" "):
+            if not arg:
+                continue
+            if arg == "stack":
+                mem_targets += [(self.state.STACK_ADDR, self.state.STACK_ADDR + self.state.STACK_SIZE)]
+            elif "m" == arg[0]:
+                try:
+                    parts = list(map(lambda p: int(p, 0), arg[1:].split("-")))
+                    if len(parts) == 1:
+                        lower = upper = parts[0]
+                    else:
+                        lower = min(parts)
+                        upper = max(parts)
+                    mem_targets += [(lower, upper)]
+                except ValueError:
+                    print(f"Error parsing address or range {arg}")
+            elif "$" == arg[0]:
+                arg = arg[1:]
+                if arg in self.state.apicall_handler.hooks.values():
+                    for addr, func_name in self.state.apicall_handler.hooks.items():
+                        if arg == func_name:
+                            code_targets += [addr]
+                            break
+                else:
+                    self.state.apicall_handler.register_pending_breakpoint(arg)
+            else:
+                try:
+                    code_targets += [int(arg, 0)]
+                except ValueError:
+                    print(f"Error parsing address {arg}")
+        with self.state.data_lock:
+            self.state.breakpoints.update(code_targets)
+            self.state.mem_breakpoints = list(merge(self.state.mem_breakpoints + mem_targets))
+            self.print_breakpoints()
+
+    def print_breakpoints(self):
+        current_breakpoints = list(map(self.try_parse_address, self.state.breakpoints))
+        current_breakpoints += list(map(lambda b: f'{b} (pending)', self.state.apicall_handler.pending_breakpoints))
+        print(f"Current breakpoints: {current_breakpoints}")
+        current_mem_breakpoints = []
+        for lower, upper in self.state.mem_breakpoints:
+            if lower == self.state.STACK_ADDR and upper == self.state.STACK_ADDR + self.state.STACK_SIZE:
+                current_mem_breakpoints += ["complete stack"]
+            else:
+                stack = lower >= self.state.STACK_ADDR and upper <= self.state.STACK_ADDR + self.state.STACK_SIZE
+                text = f"0x{lower:02x}" + (f" - 0x{upper:02x}" if upper != lower else "")
+                current_mem_breakpoints += [text + (" (stack)" if stack else "")]
+        print(f"Current mem breakpoints: {current_mem_breakpoints}")
+
+    def do_c(self, args):
+        """Continue emulation. If it hasn't been started yet, it will act the same as 'r'"""
+        if self.started:
+            self.continue_emu()
+        else:
+            print("Emulation not started yet. Starting now...")
+            self.do_r(args)
+
+    # TODO do documentation
+    def do_p(self, args):
+
+        mapping = {
+            "d": print_dos_header,
+            "dos": print_dos_header,
+            "p": print_pe_header,
+            "pe": print_pe_header,
+            "o": print_opt_header,
+            "opt": print_opt_header,
+            "a": print_all_headers,
+            "all": print_all_headers,
+            "s": print_section_table,
+            "sections": print_section_table,
+        }
+
+        args_list = args.split(" ")
+
+        for x in args_list:
+            if x in mapping.keys():
+                mapping[x](self.state.uc, self.state.BASE_ADDR)
+
+    def do_dump(self, args):
+        """Dump the emulated memory to file.
+
+Usage:          dump [dest_path]
+
+If no destination path is being specified, the dump will be carried out to
+'unpacked.exe' in the current working directory. Dumped memory region:
+From the image base address (usually 0x400000 or 0x10000000) to the end
+of the loaded image: base address + virtual memory size + 0x3000 (buffer).
+This memory region is being loaded into the first section of the PE file.
+Like this, tools like Cutter are able to correctly parse the dump and display the
+data at the right offsets.
+Stack space and memory not belonging to the image address space is not dumped."""
+        try:
+            args = args or "unpacked.exe"
+            self.state.unpacker.dump(self.state.uc, self.state.apicall_handler, path=args)
+        except OSError as e:
+            print(f"Error dumping to {args}: {e}")
+
+    def do_onlydmp(self, args):
+        args = args or "dump"
+        pe_write(self.state.uc, self.state.BASE_ADDR, self.state.virtualmemorysize, args)
+
+    def do_i(self, args):
+        """Get status information
+
+Show register values:       i r [reg names]
+If no specific registers are provided, all registers are shown
+
+Show imports:               i i
+Static and dynamic imports are shown with their respective stub addresses in the loaded image"""
+        info, *params = args.split(" ")
+        mapping = {
+            "r": self.print_regs,
+            "registers": self.print_regs,
+            "i": self.print_imports,
+            "imports": self.print_imports
+        }
+        if info in mapping:
+            mapping[info](params)
+        else:
+            print(f"Unrecognized info {info}")
+
+    def do_x(self, args):
+        """Dump memory at a specific address.
+
+Usage:          x[/n] [{FORMAT}] LOCATION
+Options:
+    n       integer, how many items should be displayed
+
+Format:     Either 'byte', 'int' (32bit) or 'str' (zero-terminated string)
+
+Location:   address (decimal or hexadecimal form) or a $-prefixed register name (use the register's value as the
+            destination address"""
+        try:
+            x_regex = re.compile(r"(?:/(\d*) )?(?:{(byte|int|str)} )?(.+)")
+            result = x_regex.findall(args)
+            if not result:
+                print("Error parsing command")
+                return
+            n, t, addr = result[0]
+            n = int(n, 0) if n else 1
+            t = t or "int"
+
+            if "$" in addr:
+                alias = addr[1:]
+                addr = get_reg_values()[alias]
+            else:
+                alias = ""
+                addr = int(addr, 0)
+
+            self.print_mem(self.state.uc, addr, n, t, alias)
+        except Exception as e:
+            print(f"Error parsing command: {e}")
+
+    def do_set(self, args):
+        """Set memory at a specific address to a custom value
+
+Usage:      set [{FORMAT}] OPERATION LOCATION
+Format:     either 'byte', 'int' (32bit) or 'str' (zero-terminated string)
+Operation:  modifies the old value instead of overwriting it (anything else than '=' is disregarded in str mode!)
+            either = (set), += (add to), *= (multiply with) or /= (divide by)
+Location:   address (decimal or hexadecimal form) for memory writing, or a $-prefixed register name to write an integer
+            to this specific register ('byte' and 'str' not supported for register mode!)"""
+        regs = {
+            "eax": UC_X86_REG_EAX,
+            "ebx": UC_X86_REG_EBX,
+            "ecx": UC_X86_REG_ECX,
+            "edx": UC_X86_REG_EDX,
+            "eip": UC_X86_REG_EIP,
+            "esp": UC_X86_REG_ESP,
+            "efl": UC_X86_REG_EFLAGS,
+            "edi": UC_X86_REG_EDI,
+            "esi": UC_X86_REG_ESI,
+            "ebp": UC_X86_REG_EBP
+        }
+        set_regs_regex = re.compile(rf"\$({'|'.join(regs.keys())}) ([+\-*/]?=) (.+)")
+        result = set_regs_regex.findall(args)
+        if result:
+            reg, op, value = result[0]
+            try:
+                value = int(value, 0)
+                old_value = get_reg_values()[reg]
+                if op == "+=":
+                    value += old_value
+                elif op == "-=":
+                    value -= old_value
+                elif op == "*=":
+                    value *= old_value
+                elif op == "/=":
+                    value = old_value // value
+                self.state.uc.reg_write(regs[reg], value)
+            except Exception as e:
+                print(f"Error: {e}")
+            return
+
+        set_regex = re.compile(r"(?:{(byte|int|str)} )?(.+) ([+\-*/]?=) (.+)")
+        result = set_regex.findall(args)
+        if not result:
+            print("Error parsing command")
+        else:
+            try:
+                t, addr, op, value = result[0]
+                t = t or "int"
+                addr = int(addr, 0)
+                types = {
+                    "byte": ("B", 1),
+                    "int": ("<I", 4),
+                    "str": ("", 0)
+                }
+                fmt, size = types[t]
+
+                if fmt:
+                    value = int(value, 0)
+                    old_value, = struct.unpack(fmt, self.state.uc.mem_read(addr, size))
+                    if op == "+=":
+                        value += old_value
+                    elif op == "-=":
+                        value -= old_value
+                    elif op == "*=":
+                        value *= old_value
+                    elif op == "/=":
+                        value = old_value // value
+                    to_write = struct.pack(fmt, value)
+                else:
+                    to_write = (value + "\x00").encode()
+                self.state.uc.mem_write(addr, to_write)
+            except Exception as e:
+                print(f"Error: {e}")
+
+    def do_r(self, args):
+        """Start execution"""
+        if self.started:
+            print("Emulation already started. Interpreting as 'c'")
+            self.do_c(args)
+            return
+        self.shell_event.clear()
+        threading.Thread(target=self.engine.emu).start()
+        self.shell_event.wait()
+
+    def do_detect(self, args):
+        """Stop emulation if certain states are detected.
+
+Usage:              detect [OPTIONS]
+Options:
+
+    h, hop          Stop emulation when section hopping is detected: Many packers have one section filled with zeros which
+                    is then filled with instructions at runtime. After unpacking, a jump is made into this section and the
+                    unpacked code is being executed. This final jump triggers section hopping detection.
+    wx, write_exec  Stop emulation when an instruction would be executed that has been modified before. Note that if the
+                    unpacking stub is self-modifying, this detection will raise some false-positives instead of finding
+                    the unpacked code."""
+        self.state.section_hopping_control = any(x in args for x in ["h", "hop"])
+        print(f"[{'x' if self.state.section_hopping_control else ' '}] section hopping detection")
+        self.state.write_execute_control = any(x in args for x in ["wx", "write_exec"])
+        print(f"[{'x' if self.state.write_execute_control else ' '}] Write+Exec detection")
+
+    def do_rst(self, args):
+        """Close the current sample and start at the initial file choosing prompt again."""
+        if self.started:
+            self.state.uc.emu_stop()
+        print("")
+        self.init_engine()
+
+    def do_s(self, args):
+        """Execute a single instruction and return to the shell"""
+        if self.started:
+            self.continue_emu(single_instruction=True)
+        else:
+            print("Emulation not started yet. Starting now...")
+            self.engine.single_instruction = True
+            self.do_r(args)
+
+    def do_del(self, args):
+        """Removes breakpoints. Usage is the same as 'b', but the selected breakpoints and breakpoint ranges are being
+deleted this time."""
+        code_targets = []
+        mem_targets = []
+        if not args:
+            self.state.breakpoints.clear()
+            self.state.mem_breakpoints.clear()
+            self.state.apicall_handler.pending_breakpoints.clear()
+        for arg in args.split(" "):
+            if not arg:
+                continue
+            if arg == "stack":
+                mem_targets += [(self.state.STACK_ADDR, self.state.STACK_ADDR + self.state.STACK_SIZE)]
+            elif "m" == arg[0]:
+                try:
+                    parts = list(map(lambda p: int(p, 0), arg[1:].split("-")))
+                    if len(parts) == 1:
+                        lower = upper = parts[0]
+                    else:
+                        lower = min(parts)
+                        upper = max(parts)
+                    mem_targets += [(lower, upper)]
+                except ValueError:
+                    print(f"Error parsing address or range {arg}")
+            elif "$" == arg[0]:
+                arg = arg[1:]
+                if arg in self.state.apicall_handler.hooks.values():
+                    for addr, func_name in self.state.apicall_handler.hooks.items():
+                        if arg == func_name:
+                            code_targets += [addr]
+                            break
+                elif arg in self.state.apicall_handler.pending_breakpoints:
+                    self.state.apicall_handler.pending_breakpoints.remove(arg)
+                else:
+                    print(f"Unknown method {arg}, not imported or used in pending breakpoint")
+            else:
+                try:
+                    code_targets += [int(arg, 0)]
+                except ValueError:
+                    print(f"Error parsing address {arg}")
+        with self.state.data_lock:
+            for t in code_targets:
+                try:
+                    self.state.breakpoints.remove(t)
+                except KeyError:
+                    pass
+            new_mem_breakpoints = []
+            for b_lower, b_upper in self.state.mem_breakpoints:
+                for t_lower, t_upper in mem_targets:
+                    new_mem_breakpoints += remove_range((b_lower, b_upper), (t_lower, t_upper))
+            self.state.mem_breakpoints = list(merge(new_mem_breakpoints))
+            self.print_breakpoints()
+
+    def do_log(self, args):
+        """Set logging level
+
+Usage:          log [OPTIONS]
+Options:
+
+    i   Log every instruction that is executed
+    r   Log memory READ access
+    w   Log memory WRITE access
+    s   Log system API calls
+
+    a   Log everything"""
+        if args == "a":
+            args = "irsw"
+        print("Log level:")
+        self.state.log_mem_read = any(x in args for x in ["r", "read"])
+        print(f"[{'x' if self.state.log_mem_read else ' '}] mem read")
+        self.state.log_mem_write = any(x in args for x in ["w", "write"])
+        print(f"[{'x' if self.state.log_mem_write else ' '}] mem write")
+        self.state.log_instr = any(x in args for x in ["i", "instr"])
+        print(f"[{'x' if self.state.log_instr else ' '}] instructions")
+        self.state.log_apicalls = any(x in args for x in ["s", "sys"])
+        print(f"[{'x' if self.state.log_apicalls else ' '}] API calls")
+
+    def do_stats(self, args):
+        """Print emulation statistics: In which section are the instructions located that were executed, which
+sections have been read from and which have been written to"""
+        self.print_stats()
+
+    def do_yara(self, args):
+        """Run YARA rules against the sample
+
+Usage:          yara [<rules_path>]
+
+If no rules file is specified, the default 'malwrsig.yar' is being used.
+Those rules are then compiled and checked against the memory dump of the current emulator state (see 'dump' for further
+details on this representation)"""
+        if not args:
+            if not self.rules:
+                try:
+                    self.rules = yara.compile(filepath="malwrsig.yar")
+                    print("Default rules file used: malwrsig.yar")
+                except:
+                    print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
+        else:
+            self.rules = yara.compile(filepath=args)
+        self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
+        matches = self.rules.match("unpacked.exe")
+        print(", ".join(map(str, matches)))
+
+    def do_exit(self, args):
+        """Exit un{i}packer"""
+        if self.started:
+            self.shell_event.clear()
+            self.engine.stop()
+            self.shell_event.wait()
+        with open("fortunes") as f:
+            fortunes = f.read().splitlines()
+        print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
+        raise SystemExit
+
+    def do_EOF(self, args):
+        """Exit un{i}packer by pressing ^D"""
+        self.do_exit(args)

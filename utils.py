@@ -1,7 +1,12 @@
-import struct
-import pefile
-import string
 import random
+import string
+import struct
+from time import time
+
+import pefile
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EIP, \
+    UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
+
 
 def print_cols(lines):
     cols = zip(*lines)
@@ -35,9 +40,9 @@ def alignments(value, multiple_of):
     if value <= multiple_of:
         return multiple_of
     c = 1
-    while value > multiple_of*c:
+    while value > multiple_of * c:
         c += 1
-    return multiple_of*c
+    return multiple_of * c
 
 
 def remove_range(old_range, to_remove):
@@ -87,16 +92,19 @@ def calc_export_offset_of_dll(dllpath, function_name):
             return e.address
     return None
 
+
 def print_dllname_to_functionlist(dllname_to_functionlist):
     for dll in dllname_to_functionlist:
         print(dll)
         for fct_name, fct_addr in dllname_to_functionlist[dll]:
             print(f"\t{fct_name}, {hex(fct_addr)}")
 
+
 def print_addr_list(list_name, list):
     hex = list_name
     hex += ', '.join('0x%02x' % l for l in list)
     print(hex)
+
 
 def calc_processid():
     x = random.randint(2000, 6000)
@@ -127,3 +135,18 @@ class ImportValues(object):
 
 class InvalidPEFile(Exception):
     pass
+
+
+def get_reg_values(uc):
+    return {
+        "eax": uc.reg_read(UC_X86_REG_EAX),
+        "ebx": uc.reg_read(UC_X86_REG_EBX),
+        "ecx": uc.reg_read(UC_X86_REG_ECX),
+        "edx": uc.reg_read(UC_X86_REG_EDX),
+        "eip": uc.reg_read(UC_X86_REG_EIP),
+        "esp": uc.reg_read(UC_X86_REG_ESP),
+        "efl": uc.reg_read(UC_X86_REG_EFLAGS),
+        "edi": uc.reg_read(UC_X86_REG_EDI),
+        "esi": uc.reg_read(UC_X86_REG_ESI),
+        "ebp": uc.reg_read(UC_X86_REG_EBP)
+    }

@@ -1,11 +1,12 @@
+import struct
+from ctypes import *
+from datetime import datetime
+
 from unicorn import UcError
 
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
     _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR
-from ctypes import *
-from datetime import datetime
-import struct
-from utils import InvalidPEFile, ImportValues
+from utils import InvalidPEFile, ImportValues, get_string
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -119,7 +120,6 @@ def parse_memory_to_header(uc, base_addr, query_header=None):
     if query_header == "IMPORTS":
         return import_table
 
-
     # Read Section Header
     section_hdr_offset = opt_hdr_offset + header_sizes["_IMAGE_OPTIONAL_HEADER"]
     section_headers = []
@@ -154,7 +154,7 @@ def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
                 imp_names = []
                 rva_to_iat = getattr(imp_struct, "FirstThunk")
                 while True:
-                    new_val = struct.unpack("<I", uc.mem_read(base_addr+rva_to_iat, 4))[0]
+                    new_val = struct.unpack("<I", uc.mem_read(base_addr + rva_to_iat, 4))[0]
                     if new_val == 0:
                         break
                     imp_name = (get_string(new_val + 2 + base_addr, uc, break_on_unprintable=True), rva_to_iat)
@@ -171,16 +171,18 @@ def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
         return imp_info_list
     return imp_struct_list
 
+
 # Deprecated
 def print_struc(s, offset, name):
-    print(name+":")
+    print(name + ":")
     for field_name, field_type in s._fields_:
         if isinstance(getattr(s, field_name), Array):
             print(f"\t +0x{offset:02x} {field_name}:")
             sub_offset = offset
             for i in range(len(getattr(s, field_name))):
                 for sub_field_name, sub_field_type in getattr(s, field_name)[i]._fields_:
-                    print(f"\t\t +{hex(sub_offset)} {sub_field_name}: {getattr(getattr(s, field_name)[i],sub_field_name)}")
+                    print(f"\t\t +{hex(sub_offset)} {sub_field_name}: "
+                          f"{getattr(getattr(s, field_name)[i], sub_field_name)}")
                     sub_offset += len(bytes(sub_field_type()))
         else:
             print(f"\t +0x{offset:02x} {field_name}: {getattr(s, field_name)}")
@@ -189,7 +191,7 @@ def print_struc(s, offset, name):
 
 def print_struc_rec(s, offset, name, indent='\t', array_dict=None):
     if name is not None:
-        print(name+":")
+        print(name + ":")
     for field_name, field_type in s._fields_:
         if isinstance(getattr(s, field_name), Array):
             print(indent + f" +0x{offset:02x} {field_name}:")
@@ -206,9 +208,10 @@ def print_struc_rec(s, offset, name, indent='\t', array_dict=None):
         else:
             if isinstance(getattr(s, field_name), int):
                 if "TimeDateStamp" in field_name:
-                    print(indent + f" +0x{offset:02x} {field_name}: {datetime.utcfromtimestamp(getattr(s, field_name)).strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"{indent} +0x{offset:02x} {field_name}: "
+                          f"{datetime.utcfromtimestamp(getattr(s, field_name)).strftime('%Y-%m-%d %H:%M:%S')}")
                 else:
-                    print(indent + f" +0x{offset:02x} {field_name}: {hex(getattr(s, field_name))}")
+                    print(f"{indent} +0x{offset:02x} {field_name}: {hex(getattr(s, field_name))}")
             else:
                 print(f"\t +0x{offset:02x} {field_name}: {getattr(s, field_name)}")
             offset += len(bytes(field_type()))
@@ -236,7 +239,8 @@ def print_opt_header(uc, base_addr):
 
 def print_section_table(uc, base_addr):
     section_table = parse_memory_to_header(uc, base_addr, "IMAGE_SECTION_HEADER")
-    offset = parse_memory_to_header(uc, base_addr, "e_lfanew") + header_sizes["_IMAGE_FILE_HEADER"] + header_sizes["_IMAGE_OPTIONAL_HEADER"]
+    offset = parse_memory_to_header(uc, base_addr, "e_lfanew") + header_sizes["_IMAGE_FILE_HEADER"] + header_sizes[
+        "_IMAGE_OPTIONAL_HEADER"]
     for i in range(len(section_table)):
         print_struc_rec(section_table[i], offset, "IMAGE_SECTION_HEADER")
         offset += header_sizes["IMAGE_SECTION_HEADER"]
@@ -263,7 +267,7 @@ def print_iat(uc, base_addr):
             imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics, 4))[0]
             while imp_array_element != 0:
                 if imp_array_element >> 0x1f == 1:
-                    print(f"{indent} Import by Ordinal: {hex(imp_array_element-0x80000000)}")
+                    print(f"{indent} Import by Ordinal: {hex(imp_array_element - 0x80000000)}")
                 else:
                     print(f"{indent} Import by Name: {get_string(base_addr + imp_array_element + 0x2, uc)}")
                 curr_pos += 0x4
@@ -303,7 +307,8 @@ def calc_offset(e_lfanew, num_of_sec, base_addr, header=None):
 
 # TODO update numofsec
 def inject_section(uc, base_addr, sec_struct):
-    soff, eoff = calc_offset(parse_memory_to_header(uc, base_addr, "e_lfanew"), parse_memory_to_header(uc, base_addr, "NumberOfSections"), base_addr, "SEC_HDR")
+    soff, eoff = calc_offset(parse_memory_to_header(uc, base_addr, "e_lfanew"),
+                             parse_memory_to_header(uc, base_addr, "NumberOfSections"), base_addr, "SEC_HDR")
     payload = bytes(sec_struct)
     uc.mem_write(eoff, payload)
 
@@ -331,8 +336,6 @@ def hdr_write(uc, base_addr, header, array_pos, **fields):
     for k, v in fields:
         if hasattr(header_struct, k):
             setattr(header_struct, k, v)
-
-
 
 
 def pe_write(uc, base_addr, total_size, filename):
@@ -421,4 +424,3 @@ class PE(object):
 
         uc.mem_write(dos_offset, dos_payload)
         uc.mem_write(pe_offset, combined_payload)
-
