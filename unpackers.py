@@ -231,14 +231,12 @@ class MPRESSUnpacker(DefaultUnpacker):
 
     def is_allowed(self, address):
         if not super().is_allowed(address) and self.swap_status == 0:
-            print(f"Setting swap_status: address: {hex(address)}")
             self.swap_status = 1
             section_start, section_end = self.get_section_from_addr(address)
             self.allowed_addr_ranges = [(address, section_end)]
             return True
 
         if not super().is_allowed(address) and self.swap_status == 1:
-            print(f"Allowed Addr Ranges: {hex(self.allowed_addr_ranges[0][0])}, {hex(self.allowed_addr_ranges[0][1])}")
             return False
 
         return True
