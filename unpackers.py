@@ -4,6 +4,7 @@ import r2pipe
 import yara
 
 from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump
+from utils import InvalidPEFile
 
 
 class DefaultUnpacker(object):
@@ -91,6 +92,15 @@ class DefaultUnpacker(object):
             if "name" in s and s["name"] == section:
                 return s["vaddr"], s["vaddr"] + s["vsize"]
         return None
+
+
+class AutomaticDefaultUnpacker(DefaultUnpacker):
+
+    def get_entrypoint(self):
+        return None  # default binary ep
+
+    def get_tail_jump(self):
+        return sys.maxsize
 
 
 class UPXUnpacker(DefaultUnpacker):
@@ -224,6 +234,7 @@ class MEWUnpacker(DefaultUnpacker):
     def get_tail_jump(self):
         return sys.maxsize, None
 
+
 class MPRESSUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
@@ -231,7 +242,6 @@ class MPRESSUnpacker(DefaultUnpacker):
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = MPRESSDump()
         self.swap_status = 0
-
 
     def is_allowed(self, address):
         if not super().is_allowed(address) and self.swap_status == 0:
@@ -286,7 +296,7 @@ def generate_label(l):
         return 'unknown'
 
 
-def get_unpacker(sample):
+def get_unpacker(sample, auto_default_unpacker=True):
     yar = "./packer_signatures.yar"
     packer, yara_matches = identifypacker(sample, yar)
     packers = {
@@ -300,9 +310,12 @@ def get_unpacker(sample):
     }
 
     if "pe32" not in str(yara_matches):
-        raise RuntimeError("Not a PE32 file!")
+        raise InvalidPEFile("Not a PE32 file!")
 
     if packer not in packers:
-        return DefaultUnpacker(sample), yara_matches
+        if auto_default_unpacker:
+            return AutomaticDefaultUnpacker(sample), yara_matches
+        else:
+            return DefaultUnpacker(sample), yara_matches
     else:
         return packers[packer](sample), yara_matches
