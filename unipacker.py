@@ -2,7 +2,6 @@ import os
 import struct
 import sys
 import threading
-from random import choice
 from time import time
 
 import pefile
@@ -14,7 +13,7 @@ from apicalls import WinApiCalls
 from headers import PE
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unpackers import get_unpacker
-from utils import print_cols, merge, align, convert_to_string
+from utils import merge, align, convert_to_string, InvalidPEFile
 
 
 class State(object):
@@ -60,6 +59,36 @@ class State(object):
         self.start = 0
 
 
+class Sample(object):
+
+    def __init__(self, path, auto_default_unpacker=True):
+        self.path = path
+        self.unpacker, self.yara_matches = get_unpacker(path, auto_default_unpacker)
+
+    def __str__(self):
+        return f"Sample: [{self.yara_matches[-1]}] {self.path}"
+
+    @staticmethod
+    def get_samples(path):
+        if os.path.isdir(path):
+            response = input("Automatically find packer entry and exit points for unknown packers? [Y/n]: ")
+            auto_default_unpacker = not response or response.lower().startswith("y")
+            for file in os.listdir(path):
+                try:
+                    sample = Sample(os.path.join(path, file), auto_default_unpacker)
+                except InvalidPEFile as e:
+                    print(f"Could not initialize {file}: {e}")
+                    continue
+                yield sample
+        else:
+            try:
+                sample = Sample(path, auto_default_unpacker=False)
+            except InvalidPEFile as e:
+                print(f"Could not initialize {path}: {e}")
+                return
+            yield sample
+
+
 class UnpackerClient(object):
 
     def emu_started(self):
@@ -80,19 +109,18 @@ class UnpackerClient(object):
 
 class UnpackerEngine(object):
 
-    def __init__(self, state, sample, unpacker):
+    def __init__(self, state, sample):
         self.state = state
-        self.state.sample = sample
-        self.state.unpacker = unpacker
+        self.sample = sample
         self.clients = []
 
         self.emulator_event = threading.Event()
         self.single_instruction = False
 
-        self.state.startaddr = self.state.unpacker.get_entrypoint()
-        self.state.endaddr, _ = self.state.unpacker.get_tail_jump()
-        self.state.write_execute_control = self.state.unpacker.write_execute_control
-        self.state.section_hopping_control = self.state.unpacker.section_hopping_control
+        self.state.startaddr = self.sample.unpacker.get_entrypoint()
+        self.state.endaddr, _ = self.sample.unpacker.get_tail_jump()
+        self.state.write_execute_control = self.sample.unpacker.write_execute_control
+        self.state.section_hopping_control = self.sample.unpacker.section_hopping_control
 
         self.init_uc()
 
@@ -124,7 +152,7 @@ class UnpackerEngine(object):
             client.address_updated(address)
 
     def getVirtualMemorySize(self):
-        r2 = r2pipe.open(self.state.sample)
+        r2 = r2pipe.open(self.sample.path)
         sections = r2.cmdj("iSj")
         min_offset = sys.maxsize
         total_size = 0
@@ -152,26 +180,26 @@ class UnpackerEngine(object):
             self.pause()
         if address == self.state.endaddr:
             print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
-            self.state.unpacker.dump(uc, self.state.apicall_handler)
+            self.sample.unpacker.dump(uc, self.state.apicall_handler)
             self.pause()
 
         if self.state.write_execute_control and address not in self.state.apicall_handler.hooks and (
                 address < self.state.HOOK_ADDR or address > self.state.HOOK_ADDR + 0x1000):
             if any(lower <= address <= upper for (lower, upper) in sorted(self.state.write_targets)):
                 print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
-                self.state.unpacker.dump(uc, self.state.apicall_handler)
+                self.sample.unpacker.dump(uc, self.state.apicall_handler)
                 self.pause()
 
         if self.state.section_hopping_control and address not in self.state.apicall_handler.hooks and address - 0x7 not in self.state.apicall_handler.hooks and (
                 address < self.state.HOOK_ADDR or address > self.state.HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
-            if not self.state.unpacker.is_allowed(address):
-                sec_name = self.state.unpacker.get_section(address)
+            if not self.sample.unpacker.is_allowed(address):
+                sec_name = self.sample.unpacker.get_section(address)
                 print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
-                self.state.unpacker.allow(address)
-                self.state.unpacker.dump(uc, self.state.apicall_handler)
+                self.sample.unpacker.allow(address)
+                self.sample.unpacker.dump(uc, self.state.apicall_handler)
                 self.pause()
 
-        curr_section = self.state.unpacker.get_section(address)
+        curr_section = self.sample.unpacker.get_section(address)
         if curr_section not in self.state.sections_executed:
             self.state.sections_executed[curr_section] = 1
         else:
@@ -196,7 +224,7 @@ class UnpackerEngine(object):
 
     # Method is executed before memory access
     def hook_mem_access(self, uc, access, address, size, value, user_data):
-        curr_section = self.state.unpacker.get_section(address)
+        curr_section = self.sample.unpacker.get_section(address)
         access_type = ""
         if access == UC_MEM_READ:
             access_type = "READ"
@@ -346,14 +374,14 @@ class UnpackerEngine(object):
 
     def init_uc(self):
         # Calculate required memory
-        pe = pefile.PE(self.state.sample)
+        pe = pefile.PE(self.sample.path)
         self.state.BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
-        self.state.unpacker.BASE_ADDR = self.state.BASE_ADDR
+        self.sample.unpacker.BASE_ADDR = self.state.BASE_ADDR
         self.state.virtualmemorysize = self.getVirtualMemorySize()
         self.state.STACK_ADDR = 0x0
         self.state.STACK_SIZE = 1024 * 1024
         STACK_START = self.state.STACK_ADDR + self.state.STACK_SIZE
-        self.state.unpacker.secs += [{"name": "stack", "vaddr": self.state.STACK_ADDR, "vsize": self.state.STACK_SIZE}]
+        self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.state.STACK_ADDR, "vsize": self.state.STACK_SIZE}]
         self.state.HOOK_ADDR = STACK_START + 0x3000 + 0x1000
 
         # Start unicorn emulator with x86-32bit architecture
@@ -363,7 +391,7 @@ class UnpackerEngine(object):
         self.state.loaded_image = pe.get_memory_mapped_image(ImageBase=self.state.BASE_ADDR)
         self.state.virtualmemorysize = align(self.state.virtualmemorysize + 0x10000,
                                              page_size=4096)  # Space possible IAT rebuilding
-        self.state.unpacker.virtualmemorysize = self.state.virtualmemorysize
+        self.sample.unpacker.virtualmemorysize = self.state.virtualmemorysize
         self.state.uc.mem_map(self.state.BASE_ADDR, self.state.virtualmemorysize)
         self.state.uc.mem_write(self.state.BASE_ADDR, self.state.loaded_image)
 
@@ -406,9 +434,9 @@ class UnpackerEngine(object):
         # init syscall handling and prepare hook memory for return values
         self.state.apicall_handler = WinApiCalls(self.state.BASE_ADDR, self.state.virtualmemorysize,
                                                  self.state.HOOK_ADDR, self.state.breakpoints,
-                                                 self.state.sample, atn, ntp)
+                                                 self.sample.path, atn, ntp)
         self.state.uc.mem_map(self.state.HOOK_ADDR, 0x1000)
-        self.state.unpacker.secs += [{"name": "hooks", "vaddr": self.state.HOOK_ADDR, "vsize": 0x1000}]
+        self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.state.HOOK_ADDR, "vsize": 0x1000}]
         hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', self.state.HOOK_ADDR) + bytes.fromhex(
             'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
         self.state.uc.mem_write(self.state.HOOK_ADDR, hexstr)
@@ -454,69 +482,7 @@ class UnpackerEngine(object):
         self.state.uc.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, self.hook_mem_invalid)
 
 
-def init_sample(show_fortune=True):
-    try:
-        histfile = ".unpacker_history"
-        if not os.path.exists(histfile):
-            open(histfile, "w+").close()
-        with open(histfile) as f:
-            known_samples = f.read().splitlines()[:10] + ["New sample..."]
-
-        print("Your options for today:\n")
-        lines = []
-        for i, s in enumerate(known_samples):
-            if s == "New sample...":
-                lines += [(f"\t[{i}]", "\x1b[33mNew sample...\x1b[0m", "")]
-            else:
-                packer, name = s.split(";")
-                lines += [(f"\t[{i}]", f"\x1b[34m{packer}:\x1b[0m", name)]
-        print_cols(lines)
-        print()
-
-        success = False
-        while not success:
-            try:
-                id = int(input("Enter the option ID: "))
-            except ValueError:
-                print("Error parsing ID")
-                continue
-            if 0 <= id < len(known_samples) - 1:
-                sample = known_samples[id].split(";")[1]
-                success = True
-            elif id == len(known_samples) - 1:
-                sample = input("Please enter the path to the file: ")
-                if not os.path.isfile(sample):
-                    print(f"Not a valid file!")
-                else:
-                    success = True
-            else:
-                print(f"Invalid ID. Allowed range: 0 - {len(known_samples) - 1}")
-                success = False
-                continue
-            try:
-                unpacker, yara_matches = get_unpacker(sample)
-            except RuntimeError as e:
-                print(e)
-                success = False
-                continue
-
-        if show_fortune:
-            with open("fortunes") as f:
-                fortunes = f.read().splitlines()
-            print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
-        else:
-            print("")
-
-        with open(histfile, "w") as f:
-            f.writelines("\n".join(sorted(set([f"{yara_matches[-1]};{sample}"] + known_samples[:-1]))))
-        return sample, unpacker
-    except EOFError:
-        with open("fortunes") as f:
-            fortunes = f.read().splitlines()
-        print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
-        sys.exit(0)
-
-
 if __name__ == '__main__':
     from shell import Shell
+
     Shell()

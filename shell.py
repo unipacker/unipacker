@@ -1,3 +1,4 @@
+import os
 import re
 import struct
 import sys
@@ -12,31 +13,90 @@ from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC
 
 from headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, print_section_table, \
     pe_write
-from unipacker import UnpackerClient, State, init_sample, UnpackerEngine
+from unipacker import UnpackerClient, State, UnpackerEngine, Sample
 from utils import get_reg_values, get_string, print_cols, merge, remove_range
 
 
 class Shell(Cmd, UnpackerClient):
 
     def __init__(self):
-        super().__init__()
-        with open("banner") as f:
-            print(f.read())
+        try:
+            Cmd.__init__(self)
+            self.histfile = ".unpacker_history"
+            self.clear_queue = False
+            while True:
+                self.sample_loop()
+                self.shell_event.wait()
 
-        self.init_engine()
+        except EOFError:
+            with open("fortunes") as f:
+                fortunes = f.read().splitlines()
+            print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
+            sys.exit(0)
 
-        threading.Thread(target=self.cmdloop).start()
+    def sample_loop(self):
+        sample_path, known_samples = self.get_path_from_user()
+        for sample in Sample.get_samples(sample_path):
+            print(f"Next up: {sample}")
+            with open(".unpacker_history", "w") as f:
+                f.writelines("\n".join(sorted(set([f"{sample.yara_matches[-1]};{sample.path}"] + known_samples))))
 
-    def init_engine(self):
+            self.init_engine(sample)
+
+            with open("fortunes") as f:
+                fortunes = f.read().splitlines()
+            print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
+            self.cmdloop()
+            if self.clear_queue:
+                break
+
+    def init_engine(self, sample):
         self.started = False
         self.rules = None
         self.address = None
         self.state = State()
         self.shell_event = threading.Event()
-        sample, unpacker = init_sample()
-        self.engine = UnpackerEngine(self.state, sample, unpacker)
+        self.engine = UnpackerEngine(self.state, sample)
         self.engine.register_client(self)
         self.address_updated(self.state.startaddr)
+
+    def get_path_from_user(self):
+        with open("banner") as f:
+            print(f.read())
+        if not os.path.exists(self.histfile):
+            open(self.histfile, "w+").close()
+        with open(self.histfile) as f:
+            known_samples = f.read().splitlines()[:10] + ["New sample..."]
+
+        print("Your options for today:\n")
+        lines = []
+        for i, s in enumerate(known_samples):
+            if s == "New sample...":
+                lines += [(f"\t[{i}]", "\x1b[33mNew sample...\x1b[0m", "")]
+            else:
+                label, name = s.split(";")
+                lines += [(f"\t[{i}]", f"\x1b[34m{label}:\x1b[0m", name)]
+        print_cols(lines)
+        print()
+
+        while True:
+            try:
+                id = int(input("Enter the option ID: "))
+            except ValueError:
+                print("Error parsing ID")
+                continue
+            if 0 <= id < len(known_samples) - 1:
+                path = known_samples[id].split(";")[1]
+            elif id == len(known_samples) - 1:
+                path = input("Please enter the sample path (single file or directory): ")
+            else:
+                print(f"Invalid ID. Allowed range: 0 - {len(known_samples) - 1}")
+                continue
+            if os.path.exists(path):
+                return path, known_samples[:-1]
+            else:
+                print("Path does not exist")
+                continue
 
     def emu_started(self):
         self.started = True
@@ -49,12 +109,8 @@ class Shell(Cmd, UnpackerClient):
 
     def emu_done(self):
         self.started = False
-        print("Emulation is done. CPU context:")
-        self.print_regs()
-        print()
-        self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
-        print()
         self.print_stats()
+        print()
         self.shell_event.set()
 
     def address_updated(self, address):
@@ -458,12 +514,22 @@ Options:
         self.state.write_execute_control = any(x in args for x in ["wx", "write_exec"])
         print(f"[{'x' if self.state.write_execute_control else ' '}] Write+Exec detection")
 
-    def do_rst(self, args):
-        """Close the current sample and start at the initial file choosing prompt again."""
+    def do_nxtsample(self, args):
+        """Close the current sample and go to the next one (if available),
+        or start at the initial file choosing prompt again."""
         if self.started:
-            self.state.uc.emu_stop()
+            self.shell_event.clear()
+            self.engine.stop()
+        else:
+            self.shell_event.set()
         print("")
-        self.init_engine()
+        return True  # exits the cmd loop
+
+    def do_rst(self, args):
+        """Close the current sample but don't continue with the next one.
+        If there are still samples in the queue, they are discarded."""
+        self.clear_queue = True
+        return self.do_nxtsample("")
 
     def do_s(self, args):
         """Execute a single instruction and return to the shell"""
