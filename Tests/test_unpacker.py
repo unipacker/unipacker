@@ -83,7 +83,7 @@ class Test(TestCase):
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
 
     def test_mpress(self):
-        hash_list = self.perform_test("MPRESS/", ["lbop20_MPRESS.exe"])
+        hash_list = self.perform_test("MPRESS/", [])
         for name, old_md5, new_md5 in hash_list:
             self.assertTrue(new_md5 == old_md5, f"Expected: {old_md5}, got {new_md5}")
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
