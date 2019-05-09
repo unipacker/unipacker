@@ -152,6 +152,10 @@ class PEtiteUnpacker(DefaultUnpacker):
     def get_entrypoint(self):
         return None
 
+    # TODO Petite section hopping not working
+    def is_allowed(self, address):
+        return True
+
     def get_tail_jump(self):
         return sys.maxsize, None
 
