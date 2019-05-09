@@ -15,8 +15,8 @@ before_install:
   - git checkout 3.3.0
   - sudo sys/install.sh
   - cd ..
-  - pip install --upgrade pip setuptools
+  - pip install --upgrade pip setuptools pytest
   - pip install -r requirements.txt
 
 script:
-  - python Tests/test_unpacker.py
+  - python -m pytest
