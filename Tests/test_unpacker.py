@@ -23,6 +23,7 @@ class Client(UnpackerClient):
 
 class Test(TestCase):
 
+
     def prepare_test(self, sample_path):
         state = State()
         unpacker, _ = get_unpacker(sample_path)
