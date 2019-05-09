@@ -49,7 +49,9 @@ class Test(TestCase):
         return md5
 
     def perform_test(self, packer, ignore):
-        os.chdir("..")
+        curr_path = os.getcwd()
+        if "Tests" in curr_path:
+            os.chdir(curr_path.split("Tests")[0])
         sample = "Sample/"
         directory = sample + packer
         hashes = []
