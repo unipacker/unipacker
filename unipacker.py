@@ -26,7 +26,7 @@ class State(object):
         self.unpacker = None
         self.yara_matches = None
         self.virtualmemorysize = 0
-        self.loaded_image = 0  # TODO rename to loaded_image
+        self.loaded_image = 0
         self.BASE_ADDR = 0
         self.HOOK_ADDR = 0
         self.STACK_ADDR = 0
@@ -430,7 +430,7 @@ class UnpackerEngine(object):
         #    for func_name, func_addr in lib.imports:
         #        func_name = func_name if func_name is not None else f"no name: 0x{func_addr:02x}"
         #        dll_name = lib.Name if lib.Name is not None else "-- unknown --"
-        #        imports.add(func_name)
+        #        self.state.imports.add(func_name)
         #        curr_hook_addr = self.state.apicall_handler.add_hook(self.state.uc, func_name, dll_name)
         #        self.state.uc.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
 

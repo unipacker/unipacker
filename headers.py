@@ -138,10 +138,10 @@ def parse_memory_to_header(uc, base_addr, query_header=None):
     return headers
 
 
-def get_imp(uc, rva, base_addr, SizeOfImporTable, read_values=False):
+def get_imp(uc, rva, base_addr, SizeOfImportTable, read_values=False):
     rva += base_addr
     entry_size = len(bytes(IMAGE_IMPORT_DESCRIPTOR()))
-    num_of_dll = SizeOfImporTable // entry_size
+    num_of_dll = SizeOfImportTable // entry_size
     imp_info_list = []
     imp_struct_list = []
     for i in range(num_of_dll):
@@ -265,6 +265,9 @@ def print_iat(uc, base_addr):
         else:
             curr_pos = 0
             imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics, 4))[0]
+            if (imp_array_element >> 20) == 0x1 and ((imp_array_element & 0xFFEFFFFF) >> 14) == 0x1:
+                print(f"{indent}No resolving of imports as hookaddr values are set")
+                continue
             while imp_array_element != 0:
                 if imp_array_element >> 0x1f == 1:
                     print(f"{indent} Import by Ordinal: {hex(imp_array_element - 0x80000000)}")
