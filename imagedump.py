@@ -155,7 +155,9 @@ class ImageDump(object):
 
         # Part 2: Validate with offset
         if len(possible_ptrs) == 1:
-            return possible_ptrs[0][0]  # Default first TODO Check with allocated section
+            if len(possible_ptrs[0]) == 0:
+                return None
+            return possible_ptrs[0][0]  # TODO Default first check with allocated section
         ptrs = []
         for i in range(len(possible_ptrs) - 1):
             l1 = possible_ptrs[i]
