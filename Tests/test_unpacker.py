@@ -4,7 +4,7 @@ import os
 import yara
 import hashlib
 
-from unipacker import State, UnpackerEngine, UnpackerClient
+from unipacker import State, UnpackerEngine, UnpackerClient, Sample
 from unpackers import get_unpacker
 
 
@@ -25,11 +25,12 @@ class Test(TestCase):
 
     def prepare_test(self, sample_path):
         state = State()
-        sample = sample_path
-        unpacker, _ = get_unpacker(sample)
+        unpacker, _ = get_unpacker(sample_path)
+        sample = Sample(sample_path)
         event = threading.Event()
         client = Client(event)
-        engine = UnpackerEngine(state, sample, unpacker)
+
+        engine = UnpackerEngine(state, sample)
         engine.register_client(client)
         threading.Thread(target=engine.emu).start()
         event.wait()
