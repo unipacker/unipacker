@@ -4,3 +4,4 @@ unicorn
 r2pipe
 yara-python
 pefile
+cmd2

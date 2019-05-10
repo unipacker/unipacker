@@ -24,13 +24,16 @@ There are also some approaches for automatic unpacking, but they are all only av
 targeting a packed Windows malware the analyst will require a Windows machine. The goal of our project is to enable
 platform independent automatic unpacking by using emulation.
 
-## Supported packers
+## Fully supported packers
 
 - **[UPX](https://github.com/upx/upx)**: Cross-platform, open source packer
 - **[ASPack](http://www.aspack.com/)**: Advanced commercial packer with a high compression ratio
 - **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
 - **[FSG](https://www.aldeid.com/wiki/Category:Digital-Forensics/Computer-Forensics/Anti-Reverse-Engineering/Packers/FSG)**: Freeware, fast to unpack
+- **[MPRESS](http://www.matcode.com/mpress.htm)**: Free, more complex packer
+- **YZPack**
 
+## Other packers
 Any other packers should work as well, as long as the needed API functions are implemented in Un{i}packer. For packers that
 aren't specifically known you will be asked whether you would like to manually specify the start and end addresses for emulation.
 If you would like to start at the entry point declared in the PE header and just emulate until section hopping is detected,

@@ -3,11 +3,11 @@ import re
 import struct
 import sys
 import threading
-from cmd import Cmd
 from random import choice
 from time import time, sleep
 
 import yara
+from cmd2 import Cmd
 from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, \
     UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
 
@@ -644,8 +644,8 @@ details on this representation)"""
         matches = self.rules.match("unpacked.exe")
         print(", ".join(map(str, matches)))
 
-    def do_exit(self, args):
-        """Exit un{i}packer"""
+    def do_eof(self, args):
+        """Exit un{i}packer by pressing ^D"""
         if self.started:
             self.shell_event.clear()
             self.engine.stop()
@@ -653,8 +653,7 @@ details on this representation)"""
         with open("fortunes") as f:
             fortunes = f.read().splitlines()
         print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
-        raise SystemExit
+        self.exit_code = 0
+        return super().do_eof(args)
 
-    def do_EOF(self, args):
-        """Exit un{i}packer by pressing ^D"""
-        self.do_exit(args)
+    do_exit = do_eof

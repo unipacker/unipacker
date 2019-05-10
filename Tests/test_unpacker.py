@@ -1,8 +1,8 @@
+import hashlib
+import os
+import sys
 import threading
 from unittest import TestCase
-import os
-import yara
-import hashlib
 
 from unipacker import State, UnpackerEngine, UnpackerClient, Sample
 from unpackers import get_unpacker
@@ -21,8 +21,33 @@ class Client(UnpackerClient):
         self.event.set()
 
 
-class Test(TestCase):
+class RepeatedTimer(object):
+    def __init__(self, interval, function, *args, **kwargs):
+        self._timer = None
+        self.interval = interval
+        self.function = function
+        self.args = args
+        self.kwargs = kwargs
+        self.is_running = False
+        self.start()
 
+    def _run(self):
+        self.is_running = False
+        self.start()
+        self.function(*self.args, **self.kwargs)
+
+    def start(self):
+        if not self.is_running:
+            self._timer = threading.Timer(self.interval, self._run)
+            self._timer.start()
+            self.is_running = True
+
+    def stop(self):
+        self._timer.cancel()
+        self.is_running = False
+
+
+class Test(TestCase):
 
     def prepare_test(self, sample_path):
         state = State()
@@ -30,11 +55,14 @@ class Test(TestCase):
         unpacker, _ = get_unpacker(sample)
         event = threading.Event()
         client = Client(event)
+        heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
 
         engine = UnpackerEngine(state, sample)
         engine.register_client(client)
+        heartbeat.start()
         threading.Thread(target=engine.emu).start()
         event.wait()
+        heartbeat.stop()
         engine.stop()
         print(f"\n--- Emulation of {os.path.basename(sample_path)} finished ---")
 
@@ -103,5 +131,3 @@ class Test(TestCase):
         for name, old_md5, new_md5 in hash_list:
             self.assertTrue(new_md5 == old_md5, f"Expected: {old_md5}, got {new_md5}")
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
-
-
