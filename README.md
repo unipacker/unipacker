@@ -26,11 +26,12 @@ platform independent automatic unpacking by using emulation.
 
 ## Fully supported packers
 
-- **[UPX](https://github.com/upx/upx)**: Cross-platform, open source packer
 - **[ASPack](http://www.aspack.com/)**: Advanced commercial packer with a high compression ratio
-- **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
 - **[FSG](https://www.aldeid.com/wiki/Category:Digital-Forensics/Computer-Forensics/Anti-Reverse-Engineering/Packers/FSG)**: Freeware, fast to unpack
+- **[MEW](https://www.softpedia.com/get/Programming/Packers-Crypters-Protectors/MEW-SE.shtml)**: Specifically designed for small binaries
 - **[MPRESS](http://www.matcode.com/mpress.htm)**: Free, more complex packer
+- **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
+- **[UPX](https://github.com/upx/upx)**: Cross-platform, open source packer
 - **YZPack**
 
 ## Other packers
@@ -41,13 +42,13 @@ press ```Enter```
 
 ## Usage
 ### Normal installation
-Install [r2](https://github.com/radare/radare2) and [YARA](https://github.com/VirusTotal/yara)
+Install the [YARA](https://github.com/VirusTotal/yara) package for your OS
 ```
 pip3 install -r requirements.txt
 python3 unipacker.py
 ```
 **Attention!** It is strongly advised to use the requirements.txt, as we use a custom version of unicorn-engine that differs
-from the PyPi package version. Additionally, one might accidentally install the "yara" package instead of "yara-python",
+from the PyPi package version. Additionally, one might accidentally install the "yara" pip package instead of "yara-python",
 which will lead to errors.
 
 For detailed instructions on how to use Un{i}packer please refer to the [Wiki](https://github.com/unipacker/unipacker/wiki).
