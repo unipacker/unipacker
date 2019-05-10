@@ -5,13 +5,13 @@ import threading
 from time import time
 
 import pefile
-import r2pipe
 from unicorn import *
 from unicorn.x86_const import *
 
 from apicalls import WinApiCalls
-from headers import PE
+from headers import PE, get_disk_headers, conv_to_class_header
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
+from pe_structs import SectionHeader, IMAGE_SECTION_HEADER
 from unpackers import get_unpacker
 from utils import merge, align, convert_to_string, InvalidPEFile
 
@@ -63,7 +63,19 @@ class Sample(object):
 
     def __init__(self, path, auto_default_unpacker=True):
         self.path = path
-        self.unpacker, self.yara_matches = get_unpacker(path, auto_default_unpacker)
+        self.headers = get_disk_headers(self)
+        self.dos_header = conv_to_class_header(self.headers["_IMAGE_DOS_HEADER"])
+        self.pe_header = conv_to_class_header(self.headers["_IMAGE_FILE_HEADER"])
+        self.opt_header = conv_to_class_header(self.headers["_IMAGE_OPTIONAL_HEADER"])
+        self.sections = conv_to_class_header(self.headers["IMAGE_SECTION_HEADER"])
+        sec_ctr = 0
+        # TODO write new section names into .exe
+        for s in self.sections:
+            if s.Name == "":
+                s.Name = "sect_" + str(sec_ctr)
+                sec_ctr += 1
+        self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
+
 
     def __str__(self):
         return f"Sample: [{self.yara_matches[-1]}] {self.path}"
@@ -152,17 +164,14 @@ class UnpackerEngine(object):
             client.address_updated(address)
 
     def getVirtualMemorySize(self):
-        r2 = r2pipe.open(self.sample.path)
-        sections = r2.cmdj("iSj")
+        sections = self.sample.sections
         min_offset = sys.maxsize
         total_size = 0
         for sec in sections:
-            if sec['vaddr'] < min_offset:
-                min_offset = sec['vaddr']
-            if 'vsize' in sec:
-                total_size += sec['vsize']
-        r2.quit()
-        total_size += (min_offset - self.state.BASE_ADDR)
+            if sec.VirtualAddress < min_offset:
+                min_offset = sec.VirtualAddress
+            total_size += sec.VirtualSize
+        total_size += min_offset
 
         return total_size
 
@@ -381,7 +390,20 @@ class UnpackerEngine(object):
         self.state.STACK_ADDR = 0x0
         self.state.STACK_SIZE = 1024 * 1024
         STACK_START = self.state.STACK_ADDR + self.state.STACK_SIZE
-        self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.state.STACK_ADDR, "vsize": self.state.STACK_SIZE}]
+        #self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.state.STACK_ADDR, "vsize": self.state.STACK_SIZE}]
+        stack_sec_header = IMAGE_SECTION_HEADER(
+            "stack".encode('ascii'),
+            self.state.STACK_SIZE,
+            self.state.STACK_ADDR,
+            self.state.STACK_SIZE,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        self.sample.unpacker.secs.append(SectionHeader(stack_sec_header))
         self.state.HOOK_ADDR = STACK_START + 0x3000 + 0x1000
 
         # Start unicorn emulator with x86-32bit architecture
@@ -436,7 +458,22 @@ class UnpackerEngine(object):
                                                  self.state.HOOK_ADDR, self.state.breakpoints,
                                                  self.sample.path, atn, ntp)
         self.state.uc.mem_map(self.state.HOOK_ADDR, 0x1000)
-        self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.state.HOOK_ADDR, "vsize": 0x1000}]
+        #self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.state.HOOK_ADDR, "vsize": 0x1000}]
+        hook_sec_header = IMAGE_SECTION_HEADER(
+            "hooks".encode('ascii'),
+            0x1000,
+            self.state.HOOK_ADDR,
+            0x1000,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+        self.sample.unpacker.secs.append(SectionHeader(stack_sec_header))
+
+
         hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', self.state.HOOK_ADDR) + bytes.fromhex(
             'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
         self.state.uc.mem_write(self.state.HOOK_ADDR, hexstr)

@@ -1,6 +1,5 @@
 import sys
 
-import r2pipe
 import yara
 
 from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump
@@ -11,16 +10,15 @@ class DefaultUnpacker(object):
 
     def __init__(self, sample):
         self.sample = sample
-        r2 = r2pipe.open(sample)
-        self.secs = r2.cmdj("iSj")
-        ep = r2.cmdj("iej")[0]["vaddr"]
-        r2.quit()
-        self.allowed_sections = [s["name"] for s in self.secs if
-                                 "vaddr" in s and "name" in s and s["vaddr"] <= ep < s["vaddr"] + s["vsize"]]
+
+        self.secs = sample.sections
+        self.BASE_ADDR = sample.opt_header.ImageBase
+        self.ep = sample.opt_header.AddressOfEntryPoint + self.BASE_ADDR
+        self.allowed_sections = [s.Name for s in self.secs if s.VirtualAddress + self.BASE_ADDR <= self.ep < s.VirtualAddress + s.VirtualSize + self.BASE_ADDR]
+
         self.section_hopping_control = len(self.allowed_sections) > 0
         self.dumper = ImageDump()
         self.write_execute_control = False
-        self.BASE_ADDR = None
         self.allowed_addr_ranges = []
         self.virtualmemorysize = None
 
@@ -68,29 +66,28 @@ class DefaultUnpacker(object):
     def get_allowed_addr_ranges(self):
         allowed_ranges = []
         for s in self.secs:
-            if 'name' in s:
-                if s['name'] in self.allowed_sections:
-                    start_addr = s['vaddr']
-                    end_addr = s['vsize'] + start_addr
-                    allowed_ranges += [(start_addr, end_addr)]
+            if s.Name in self.allowed_sections:
+                start_addr = s.VirtualAddress + self.BASE_ADDR
+                end_addr = s.VirtualSize + start_addr + self.BASE_ADDR
+                allowed_ranges += [(start_addr, end_addr)]
         return allowed_ranges
 
     def get_section(self, address):
         for s in self.secs:
-            if s["vaddr"] <= address < s["vaddr"] + s["vsize"]:
-                return s["name"] if "name" in s else "unknown name"
+            if s.VirtualAddress + self.BASE_ADDR <= address < s.VirtualAddress + s.VirtualSize + self.BASE_ADDR:
+                return s.Name
         return "external"
 
     def get_section_from_addr(self, address):
         for s in self.secs:
-            if s["vaddr"] <= address < s["vaddr"] + s["vsize"]:
-                return s["vaddr"], s["vaddr"] + s["vsize"]
+            if s.VirtualAddress + self.BASE_ADDR <= address < s.VirtualAddress + s.VirtualSize + self.BASE_ADDR:
+                return s.VirtualAddress + self.BASE_ADDR, s.VirtualAddress + s.VirtualSize + self.BASE_ADDR
         return None, None
 
     def get_section_range(self, section):
         for s in self.secs:
-            if "name" in s and s["name"] == section:
-                return s["vaddr"], s["vaddr"] + s["vsize"]
+            if s.Name == section:
+                return s.VirtualAddress + self.BASE_ADDR, s.VirtualAddress + s.VirtualSize + self.BASE_ADDR
         return None
 
 
@@ -107,51 +104,15 @@ class UPXUnpacker(DefaultUnpacker):
 
     def __init__(self, sample):
         super().__init__(sample)
-        self.jmp_to_oep, self.oep = self.find_tail_jump()
+        self.allowed_sections = []
         self.dumper = UPXDump()
-
-    def is_allowed(self, address):
-        return True
-
-    def find_tail_jump(self):
-        r2 = r2pipe.open(self.sample)
-
-        ep = r2.cmdj("iej")[0]['vaddr']
-        r2.cmd(f"s {ep}")
-
-        upx_section = self.get_section(ep)
-        upx_saddr, upx_endaddr = self.get_section_range(upx_section)
-
-        disass_size = upx_endaddr - ep
-
-        json = r2.cmdj(f"pDj {disass_size}")
-        r2.quit()
-        i = len(json) - 1
-        while i >= 0:
-            e = json[i]
-            if 'opcode' in e:
-                instruction = e['opcode']
-                addr = e['offset']
-                l_instrcuction = instruction.split()
-                if l_instrcuction[0] == 'jmp':
-                    oep = int(l_instrcuction[1], 0)
-                    if oep < upx_saddr or oep > upx_endaddr:
-                        return addr, oep
-            i -= 1
-
-        print("Jump to OEP was not found!")
-        return super().get_tail_jump()
+        for s in self.secs:
+            if s.SizeOfRawData > 0:
+                self.allowed_sections += [s.Name]
+        self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
     def get_tail_jump(self):
-        return self.jmp_to_oep, self.oep
-
-    def get_vaddr_of_section(self, r2, section):
-        for i in self.secs:
-            if 'name' in i:
-                if section == i['name']:
-                    start_addr = i['vaddr']
-                    end_addr = i['vsize'] + start_addr
-                    return start_addr, end_addr
+        return sys.maxsize, None
 
     def get_entrypoint(self):
         return None
@@ -187,14 +148,11 @@ class ASPackUnpacker(DefaultUnpacker):
 class FSGUnpacker(DefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
-        r2 = r2pipe.open(sample)
-        secs = r2.cmdj("iSj")
         self.allowed_sections = []
         self.dumper = FSGDump()
-        for s in secs:
-            if "size" in s and s["size"] > 0:
-                self.allowed_sections += [s["name"]]
-        r2.quit()
+        for s in self.secs:
+            if s.SizeOfRawData > 0:
+                self.allowed_sections += [s.Name]
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
     def get_entrypoint(self):
@@ -298,7 +256,7 @@ def generate_label(l):
 
 def get_unpacker(sample, auto_default_unpacker=True):
     yar = "./packer_signatures.yar"
-    packer, yara_matches = identifypacker(sample, yar)
+    packer, yara_matches = identifypacker(sample.path, yar)
     packers = {
         "upx": UPXUnpacker,
         "petite": PEtiteUnpacker,

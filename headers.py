@@ -5,7 +5,8 @@ from datetime import datetime
 from unicorn import UcError
 
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
-    _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR
+    _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR, SectionHeader, DosHeader, PEHeader, OptionalHeader, \
+    ImportDescriptor, DataDirectory
 from utils import InvalidPEFile, ImportValues, get_string
 
 header_sizes = {
@@ -59,6 +60,116 @@ datadirectory_entry_to_pos = {"IMAGE_DIRECTORY_ENTRY_EXPORT": 0, "IMAGE_DIRECTOR
                               "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10, "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
                               "IMAGE_DIRECTORY_ENTRY_IAT": 12, "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
                               "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14, "IMAGE_DIRECTORY_ENTRY_RESERVED": 15}
+
+
+def parse_disk_to_header(sample, query_header=None):
+    # Read DOS Header
+    with open(sample, 'rb') as f:
+        dos_read = bytearray(f.read(header_sizes["_IMAGE_DOS_HEADER"]))
+        dos_header = _IMAGE_DOS_HEADER.from_buffer(dos_read)
+
+        if getattr(dos_header, "e_magic") != 0x5A4D:
+            print(f"e_magic = {getattr(dos_header, 'e_magic')}")
+            print("Wrong DOS Magic Value (MZ). Aborting...")
+            raise InvalidPEFile
+
+        e_lfanew = getattr(dos_header, "e_lfanew")
+
+        if query_header == "e_lfanew":
+            return e_lfanew
+
+        if query_header == "_IMAGE_DOS_HEADER":
+            return dos_header
+
+        # Read PE Header
+        pe_hdr_offset = e_lfanew
+        f.seek(pe_hdr_offset)
+        pe_read = bytearray(f.read(header_sizes["_IMAGE_FILE_HEADER"]))
+        pe_header = _IMAGE_FILE_HEADER.from_buffer(pe_read)
+
+        if getattr(pe_header, "Signature") != 0x4550:
+            print(f"Signature: {getattr(pe_header, 'Signature')}")
+            print("Wrong PE Header Signature. Aborting...")
+            raise InvalidPEFile
+
+        number_of_sections = getattr(pe_header, "NumberOfSections")
+
+        if query_header == "NumberOfSections":
+            return number_of_sections
+
+        if query_header == "_IMAGE_FILE_HEADER":
+            return pe_header
+
+        # Read Optional Header
+        opt_hdr_offset = pe_hdr_offset + header_sizes["_IMAGE_FILE_HEADER"]
+        f.seek(opt_hdr_offset)
+        opt_read = bytearray(f.read(header_sizes["_IMAGE_OPTIONAL_HEADER"]))
+        opt_header = _IMAGE_OPTIONAL_HEADER.from_buffer(opt_read)
+
+        if getattr(opt_header, "Magic") != 0x10B:
+            print(f"OPT Magic: {getattr(opt_header, 'Magic')}")
+            print("Wrong Optional Header Magic. Aborting...")
+            raise InvalidPEFile
+
+        if query_header == "_IMAGE_OPTIONAL_HEADER":
+            return opt_header
+
+        if query_header == "_IMAGE_DATA_DIRECTORY":
+            return getattr(opt_header, "DataDirectory")
+
+        rva_to_IMAGE_IMPORT_DESCRIPTOR = getattr(getattr(opt_header, "DataDirectory")[1], "VirtualAddress")
+        size_import_table = getattr(getattr(opt_header, "DataDirectory")[1], "Size")
+        # import_table = get_imp(uc, rva_to_IMAGE_IMPORT_DESCRIPTOR, base_addr, size_import_table)
+        import_table = []
+        # TODO remove uc imp table
+        if query_header == "IMPORTS":
+            return import_table
+
+        # Read Section Header
+        section_hdr_offset = opt_hdr_offset + header_sizes["_IMAGE_OPTIONAL_HEADER"]
+        section_headers = []
+        for i in range(number_of_sections):
+            f.seek(section_hdr_offset)
+            sec_read = bytearray(f.read(header_sizes["IMAGE_SECTION_HEADER"]))
+            sec_header = IMAGE_SECTION_HEADER.from_buffer(sec_read)
+            section_headers.append(sec_header)
+            section_hdr_offset += header_sizes["IMAGE_SECTION_HEADER"]
+
+        if query_header == "IMAGE_SECTION_HEADER":
+            return section_headers
+
+        headers = {"_IMAGE_DOS_HEADER": dos_header, "_IMAGE_FILE_HEADER": pe_header, "_IMAGE_OPTIONAL_HEADER": opt_header,
+                   "IMAGE_SECTION_HEADER": section_headers, "IMPORTS": import_table, }
+
+        return headers
+
+
+def get_disk_headers(sample):
+    return parse_disk_to_header(sample.path)
+
+
+def conv_to_class_header(header):
+    header_types = {
+        _IMAGE_DOS_HEADER: DosHeader,
+        _IMAGE_FILE_HEADER: PEHeader,
+        _IMAGE_OPTIONAL_HEADER: OptionalHeader,
+        IMAGE_SECTION_HEADER: SectionHeader,
+        IMAGE_IMPORT_DESCRIPTOR: ImportDescriptor,
+        _IMAGE_DATA_DIRECTORY: DataDirectory,
+    }
+    if isinstance(header, list) or isinstance(header, Array):
+        converted = []
+        for h in header:
+            converted.append(conv_to_class_header(h))
+        return converted
+    else:
+        for hdr_type in header_types:
+            if isinstance(header, hdr_type):
+                new_header = header_types[hdr_type](header)
+                if isinstance(new_header, OptionalHeader):
+                    new_header.DataDirectory = conv_to_class_header(new_header.DataDirectory)
+                return new_header
+
 
 
 def parse_memory_to_header(uc, base_addr, query_header=None):
