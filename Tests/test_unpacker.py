@@ -26,8 +26,8 @@ class Test(TestCase):
 
     def prepare_test(self, sample_path):
         state = State()
-        unpacker, _ = get_unpacker(sample_path)
         sample = Sample(sample_path)
+        unpacker, _ = get_unpacker(sample)
         event = threading.Event()
         client = Client(event)
 
