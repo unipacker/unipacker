@@ -30,6 +30,7 @@ platform independent automatic unpacking by using emulation.
 - **[ASPack](http://www.aspack.com/)**: Advanced commercial packer with a high compression ratio
 - **[PEtite](https://www.un4seen.com/petite/)**: Freeware packer, similar to ASPack
 - **[FSG](https://www.aldeid.com/wiki/Category:Digital-Forensics/Computer-Forensics/Anti-Reverse-Engineering/Packers/FSG)**: Freeware, fast to unpack
+- **[MPRESS](http://www.matcode.com/mpress.htm)**: Free, more complex packer
 - **YZPack**
 
 ## Other packers
