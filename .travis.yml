@@ -8,14 +8,6 @@ python:
 cache: pip
 
 before_install:
-  - sudo apt-get update
-  - sudo apt-get install -y build-essential git
-  - cd ..
-  - git clone https://github.com/radare/radare2.git
-  - cd radare2
-  - git checkout 3.3.0
-  - sudo sys/install.sh
-  - cd ../unipacker
   - pip install --upgrade pip setuptools pytest
   - pip install -r requirements.txt
 
