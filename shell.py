@@ -1,3 +1,4 @@
+import builtins
 import os
 import re
 import struct
@@ -16,12 +17,15 @@ from headers import print_dos_header, print_pe_header, print_opt_header, print_a
 from unipacker import UnpackerClient, State, UnpackerEngine, Sample
 from utils import get_reg_values, get_string, print_cols, merge, remove_range
 
+_print = builtins.print
+
 
 class Shell(Cmd, UnpackerClient):
 
     def __init__(self):
         try:
             Cmd.__init__(self)
+            builtins.print = self.shell_print
             self.histfile = ".unpacker_history"
             self.clear_queue = False
             while True:
@@ -34,10 +38,14 @@ class Shell(Cmd, UnpackerClient):
             print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
             sys.exit(0)
 
+    def shell_print(self, *args, **kwargs):
+        kwargs["file"] = self.stdout
+        _print(*args, **kwargs)
+
     def sample_loop(self):
         sample_path, known_samples = self.get_path_from_user()
         for sample in Sample.get_samples(sample_path):
-            print(f"Next up: {sample}")
+            print(f"\nNext up: {sample}")
             with open(".unpacker_history", "w") as f:
                 f.writelines("\n".join(sorted(set([f"{sample.yara_matches[-1]};{sample.path}"] + known_samples))))
 
