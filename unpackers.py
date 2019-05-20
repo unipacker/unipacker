@@ -22,17 +22,20 @@ class DefaultUnpacker(object):
         self.allowed_addr_ranges = []
         self.virtualmemorysize = None
 
+        self.startaddr = self.get_entrypoint()
+        self.endaddr = self.get_tail_jump()
+
     def get_tail_jump(self):
         while True:
             try:
                 endaddr = input("Define manual end address for emulation (leave empty for max value): ")
                 if endaddr == "":
-                    return sys.maxsize, None
+                    return sys.maxsize
                 endaddr = int(endaddr, 0)
                 break
             except ValueError:
                 print("Incorrect end address!")
-        return endaddr, None
+        return endaddr
 
     def get_entrypoint(self):
         while True:
@@ -100,7 +103,7 @@ class AutomaticDefaultUnpacker(DefaultUnpacker):
         return sys.maxsize
 
 
-class UPXUnpacker(DefaultUnpacker):
+class UPXUnpacker(AutomaticDefaultUnpacker):
 
     def __init__(self, sample):
         super().__init__(sample)
@@ -111,41 +114,23 @@ class UPXUnpacker(DefaultUnpacker):
                 self.allowed_sections += [s.Name]
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
-    def get_tail_jump(self):
-        return sys.maxsize, None
 
-    def get_entrypoint(self):
-        return None
-
-
-class PEtiteUnpacker(DefaultUnpacker):
-
-    def get_entrypoint(self):
-        return None
+class PEtiteUnpacker(AutomaticDefaultUnpacker):
 
     # TODO Petite section hopping not working
     def is_allowed(self, address):
         return True
 
-    def get_tail_jump(self):
-        return sys.maxsize, None
 
-
-class ASPackUnpacker(DefaultUnpacker):
+class ASPackUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = ['.aspack']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = ASPackDump()
 
-    def get_entrypoint(self):
-        return None
 
-    def get_tail_jump(self):
-        return sys.maxsize, None
-
-
-class FSGUnpacker(DefaultUnpacker):
+class FSGUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = []
@@ -155,28 +140,16 @@ class FSGUnpacker(DefaultUnpacker):
                 self.allowed_sections += [s.Name]
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
-    def get_entrypoint(self):
-        return None
 
-    def get_tail_jump(self):
-        return sys.maxsize, None
-
-
-class YZPackUnpacker(DefaultUnpacker):
+class YZPackUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = ['.yzpack', '.yzpack2']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = YZPackDump()
 
-    def get_entrypoint(self):
-        return None
 
-    def get_tail_jump(self):
-        return sys.maxsize, None
-
-
-class MEWUnpacker(DefaultUnpacker):
+class MEWUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = []
@@ -186,14 +159,8 @@ class MEWUnpacker(DefaultUnpacker):
     def is_allowed(self, address):
         return "MEW" not in self.get_section(address)
 
-    def get_entrypoint(self):
-        return None
 
-    def get_tail_jump(self):
-        return sys.maxsize, None
-
-
-class MPRESSUnpacker(DefaultUnpacker):
+class MPRESSUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.allowed_sections = [".MPRESS2"]
@@ -212,12 +179,6 @@ class MPRESSUnpacker(DefaultUnpacker):
             return False
 
         return True
-
-    def get_entrypoint(self):
-        return None
-
-    def get_tail_jump(self):
-        return sys.maxsize, None
 
 
 def identifypacker(sample, yar):

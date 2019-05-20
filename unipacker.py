@@ -16,49 +16,6 @@ from unpackers import get_unpacker
 from utils import merge, align, convert_to_string, InvalidPEFile
 
 
-class State(object):
-
-    def __init__(self):
-        self.imports = set()
-        self.uc = None
-        self.sample = None
-        self.unpacker = None
-        self.yara_matches = None
-        self.virtualmemorysize = 0
-        self.loaded_image = 0
-        self.BASE_ADDR = 0
-        self.HOOK_ADDR = 0
-        self.STACK_ADDR = 0
-        self.STACK_SIZE = 0
-        self.PEB_BASE = 0
-        self.TEB_BASE = 0
-
-        self.section_hopping_control = True
-        self.write_execute_control = False
-
-        self.breakpoints = set()
-        self.mem_breakpoints = []
-        self.data_lock = threading.Lock()
-        self.instruction_lock = threading.Lock()  # TODO unused, do we need this?
-        self.single_instruction = False
-        self.apicall_handler = None
-        self.startaddr = 0
-        self.endaddr = 0
-
-        self.log_mem_read = False
-        self.log_mem_write = False
-        self.log_instr = False
-        self.log_apicalls = False
-
-        self.sections_read = {}
-        self.sections_written = {}
-        self.write_targets = []
-        self.sections_executed = {}
-        self.apicall_counter = {}
-
-        self.start = 0
-
-
 class Sample(object):
 
     def __init__(self, path, auto_default_unpacker=True):
@@ -68,14 +25,16 @@ class Sample(object):
         self.pe_header = conv_to_class_header(self.headers["_IMAGE_FILE_HEADER"])
         self.opt_header = conv_to_class_header(self.headers["_IMAGE_OPTIONAL_HEADER"])
         self.sections = conv_to_class_header(self.headers["IMAGE_SECTION_HEADER"])
+        self.imports = set()
+
         sec_ctr = 0
         # TODO write new section names into .exe
         for s in self.sections:
             if s.Name == "":
                 s.Name = "sect_" + str(sec_ctr)
                 sec_ctr += 1
-        self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
 
+        self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
 
     def __str__(self):
         return f"Sample: [{self.yara_matches[-1]}] {self.path}"
@@ -121,18 +80,38 @@ class UnpackerClient(object):
 
 class UnpackerEngine(object):
 
-    def __init__(self, state, sample):
-        self.state = state
+    def __init__(self, sample):
         self.sample = sample
         self.clients = []
 
         self.emulator_event = threading.Event()
         self.single_instruction = False
 
-        self.state.startaddr = self.sample.unpacker.get_entrypoint()
-        self.state.endaddr, _ = self.sample.unpacker.get_tail_jump()
-        self.state.write_execute_control = self.sample.unpacker.write_execute_control
-        self.state.section_hopping_control = self.sample.unpacker.section_hopping_control
+        self.breakpoints = set()
+        self.mem_breakpoints = []
+        self.data_lock = threading.Lock()
+        self.single_instruction = False
+        self.apicall_handler = None
+
+        self.log_mem_read = False
+        self.log_mem_write = False
+        self.log_instr = False
+        self.log_apicalls = False
+
+        self.sections_read = {}
+        self.sections_written = {}
+        self.write_targets = []
+        self.sections_executed = {}
+        self.apicall_counter = {}
+
+        self.start = 0
+
+        self.uc = None
+        self.HOOK_ADDR = 0
+        self.STACK_ADDR = 0
+        self.STACK_SIZE = 0
+        self.PEB_BASE = 0
+        self.TEB_BASE = 0
 
         self.init_uc()
 
@@ -146,7 +125,7 @@ class UnpackerEngine(object):
         self.emulator_event.wait()
 
     def stop(self):
-        self.state.uc.emu_stop()
+        self.uc.emu_stop()
         self.emulator_event.set()
 
     def stopped(self):
@@ -182,51 +161,51 @@ class UnpackerEngine(object):
         self.update_address(address)
         self.emulator_event.wait()
 
-        with self.state.data_lock:
-            breakpoint_hit = address in self.state.breakpoints
+        with self.data_lock:
+            breakpoint_hit = address in self.breakpoints
         if breakpoint_hit:
             print("\x1b[31mBreakpoint hit!\x1b[0m")
             self.pause()
-        if address == self.state.endaddr:
+        if address == self.sample.unpacker.endaddr:
             print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
-            self.sample.unpacker.dump(uc, self.state.apicall_handler)
+            self.sample.unpacker.dump(uc, self.apicall_handler)
             self.pause()
 
-        if self.state.write_execute_control and address not in self.state.apicall_handler.hooks and (
-                address < self.state.HOOK_ADDR or address > self.state.HOOK_ADDR + 0x1000):
-            if any(lower <= address <= upper for (lower, upper) in sorted(self.state.write_targets)):
+        if self.sample.unpacker.write_execute_control and address not in self.apicall_handler.hooks and (
+                address < self.HOOK_ADDR or address > self.HOOK_ADDR + 0x1000):
+            if any(lower <= address <= upper for (lower, upper) in sorted(self.write_targets)):
                 print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
-                self.sample.unpacker.dump(uc, self.state.apicall_handler)
+                self.sample.unpacker.dump(uc, self.apicall_handler)
                 self.pause()
 
-        if self.state.section_hopping_control and address not in self.state.apicall_handler.hooks and address - 0x7 not in self.state.apicall_handler.hooks and (
-                address < self.state.HOOK_ADDR or address > self.state.HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
+        if self.sample.unpacker.section_hopping_control and address not in self.apicall_handler.hooks and address - 0x7 not in self.apicall_handler.hooks and (
+                address < self.HOOK_ADDR or address > self.HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
             if not self.sample.unpacker.is_allowed(address):
                 sec_name = self.sample.unpacker.get_section(address)
                 print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
                 self.sample.unpacker.allow(address)
-                self.sample.unpacker.dump(uc, self.state.apicall_handler)
+                self.sample.unpacker.dump(uc, self.apicall_handler)
                 self.pause()
 
         curr_section = self.sample.unpacker.get_section(address)
-        if curr_section not in self.state.sections_executed:
-            self.state.sections_executed[curr_section] = 1
+        if curr_section not in self.sections_executed:
+            self.sections_executed[curr_section] = 1
         else:
-            self.state.sections_executed[curr_section] += 1
+            self.sections_executed[curr_section] += 1
 
-        if address in self.state.apicall_handler.hooks:
+        if address in self.apicall_handler.hooks:
             esp = uc.reg_read(UC_X86_REG_ESP)
-            api_call_name = self.state.apicall_handler.hooks[address]
-            ret, esp = self.state.apicall_handler.apicall(address, api_call_name, uc, esp, self.state.log_apicalls)
+            api_call_name = self.apicall_handler.hooks[address]
+            ret, esp = self.apicall_handler.apicall(address, api_call_name, uc, esp, self.log_apicalls)
 
-            if api_call_name not in self.state.apicall_counter:
-                self.state.apicall_counter[api_call_name] = 1
+            if api_call_name not in self.apicall_counter:
+                self.apicall_counter[api_call_name] = 1
             else:
-                self.state.apicall_counter[api_call_name] += 1
+                self.apicall_counter[api_call_name] += 1
             if ret is not None:  # might be a void function
-                uc.mem_write(self.state.HOOK_ADDR, struct.pack("<I", ret))
+                uc.mem_write(self.HOOK_ADDR, struct.pack("<I", ret))
             uc.reg_write(UC_X86_REG_ESP, esp)
-        self.state.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
+        self.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
 
         if self.single_instruction:
             self.pause()
@@ -237,26 +216,26 @@ class UnpackerEngine(object):
         access_type = ""
         if access == UC_MEM_READ:
             access_type = "READ"
-            if curr_section not in self.state.sections_read:
-                self.state.sections_read[curr_section] = 1
+            if curr_section not in self.sections_read:
+                self.sections_read[curr_section] = 1
             else:
-                self.state.sections_read[curr_section] += 1
-            self.state.log_mem_read and print(">>> Memory is being READ at 0x%x, data size = %u" % (address, size))
+                self.sections_read[curr_section] += 1
+            self.log_mem_read and print(">>> Memory is being READ at 0x%x, data size = %u" % (address, size))
         elif access == UC_MEM_WRITE:
             access_type = "WRITE"
-            self.state.write_targets = list(merge(self.state.write_targets + [(address, address + size)]))
-            if curr_section not in self.state.sections_written:
-                self.state.sections_written[curr_section] = 1
+            self.write_targets = list(merge(self.write_targets + [(address, address + size)]))
+            if curr_section not in self.sections_written:
+                self.sections_written[curr_section] = 1
             else:
-                self.state.sections_written[curr_section] += 1
-            self.state.log_mem_write and print(
+                self.sections_written[curr_section] += 1
+            self.log_mem_write and print(
                 ">>> Memory is being WRITTEN at 0x%x, data size = %u, data value = 0x%x" % (address, size, value))
         else:
             for access_name, val in unicorn_const.__dict__.items():
                 if val == access and "UC_MEM" in access_name:
                     access_type = access_name[6:]  # remove UC_MEM from the access type
                     print(f"Unexpected mem access type {access_type}, addr: 0x{address:02x}")
-        if any(lower <= address <= upper for lower, upper in self.state.mem_breakpoints):
+        if any(lower <= address <= upper for lower, upper in self.mem_breakpoints):
             print(f"\x1b[31mMemory breakpoint hit! Access {access_type} to 0x{address:02x}")
             self.pause()
 
@@ -264,7 +243,7 @@ class UnpackerEngine(object):
         for access_name, val in unicorn_const.__dict__.items():
             if val == access and "UC_MEM" in access_name:
                 print(f"Invalid memory access {access_name}, addr: 0x{address:02x}")
-                self.state.uc.emu_stop()
+                self.uc.emu_stop()
                 return
 
     def emu(self):
@@ -272,13 +251,14 @@ class UnpackerEngine(object):
             for client in self.clients:
                 client.emu_started()
             self.emulator_event.set()
-            self.state.start = time()
-            if self.state.endaddr == sys.maxsize:
-                print(f"Emulation starting at {hex(self.state.startaddr)}")
+            self.start = time()
+            if self.sample.unpacker.endaddr == sys.maxsize:
+                print(f"Emulation starting at {hex(self.sample.unpacker.startaddr)}")
             else:
-                print(f"Emulation starting. Bounds: from {hex(self.state.startaddr)} to {hex(self.state.endaddr)}")
-            # Start emulation from self.state.startaddr
-            self.state.uc.emu_start(self.state.startaddr, sys.maxsize)
+                print(f"Emulation starting. Bounds: "
+                      f"from {hex(self.sample.unpacker.startaddr)} to {hex(self.sample.unpacker.endaddr)}")
+            # Start emulation from self.sample.unpacker.startaddr
+            self.uc.emu_start(self.sample.unpacker.startaddr, sys.maxsize)
         except UcError as e:
             print(f"Error: {e}")
         finally:
@@ -286,25 +266,25 @@ class UnpackerEngine(object):
             self.emulator_event.clear()
 
     def setup_processinfo(self):
-        self.state.TEB_BASE = 0x200000
-        self.state.PEB_BASE = self.state.TEB_BASE + 0x1000
-        LDR_PTR = self.state.PEB_BASE + 0x1000
+        self.TEB_BASE = 0x200000
+        self.PEB_BASE = self.TEB_BASE + 0x1000
+        LDR_PTR = self.PEB_BASE + 0x1000
         LIST_ENTRY_BASE = LDR_PTR + 0x1000
 
         teb = TEB(
             -1,  # fs:00h
-            self.state.STACK_ADDR + self.state.STACK_SIZE,  # fs:04h
-            self.state.STACK_ADDR,  # fs:08h
+            self.STACK_ADDR + self.STACK_SIZE,  # fs:04h
+            self.STACK_ADDR,  # fs:08h
             0,  # fs:0ch
             0,  # fs:10h
             0,  # fs:14h
-            self.state.TEB_BASE,  # fs:18h (teb base)
+            self.TEB_BASE,  # fs:18h (teb base)
             0,  # fs:1ch
             0xdeadbeef,  # fs:20h (process id)
             0xdeadbeef,  # fs:24h (current thread id)
             0,  # fs:28h
             0,  # fs:2ch
-            self.state.PEB_BASE,  # fs:3ch (peb base)
+            self.PEB_BASE,  # fs:3ch (peb base)
         )
 
         peb = PEB(
@@ -313,7 +293,7 @@ class UnpackerEngine(object):
             0,
             0,
             0xffffffff,
-            self.state.BASE_ADDR,
+            self.sample.BASE_ADDR,
             LDR_PTR,
         )
 
@@ -357,14 +337,14 @@ class UnpackerEngine(object):
         kernelbase_payload = bytes(kernelbase_entry)
         kernel32_payload = bytes(kernel32_entry)
 
-        self.state.uc.mem_map(self.state.TEB_BASE, align(0x5000))
-        self.state.uc.mem_write(self.state.TEB_BASE, teb_payload)
-        self.state.uc.mem_write(self.state.PEB_BASE, peb_payload)
-        self.state.uc.mem_write(LDR_PTR, ldr_payload)
-        self.state.uc.mem_write(LIST_ENTRY_BASE, ntdll_payload)
-        self.state.uc.mem_write(LIST_ENTRY_BASE + 12, kernelbase_payload)
-        self.state.uc.mem_write(LIST_ENTRY_BASE + 24, kernel32_payload)
-        self.state.uc.windows_tib = self.state.TEB_BASE
+        self.uc.mem_map(self.TEB_BASE, align(0x5000))
+        self.uc.mem_write(self.TEB_BASE, teb_payload)
+        self.uc.mem_write(self.PEB_BASE, peb_payload)
+        self.uc.mem_write(LDR_PTR, ldr_payload)
+        self.uc.mem_write(LIST_ENTRY_BASE, ntdll_payload)
+        self.uc.mem_write(LIST_ENTRY_BASE + 12, kernelbase_payload)
+        self.uc.mem_write(LIST_ENTRY_BASE + 24, kernel32_payload)
+        self.uc.windows_tib = self.TEB_BASE
 
     def load_dll(self, path_dll, start_addr):
         filename = os.path.splitext(os.path.basename(path_dll))[0]
@@ -373,29 +353,29 @@ class UnpackerEngine(object):
             loaded_dll = dll.get_memory_mapped_image(ImageBase=start_addr)
             with open(f"DLLs/{filename}.ldll", 'wb') as f:
                 f.write(loaded_dll)
-            self.state.uc.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
-            self.state.uc.mem_write(start_addr, loaded_dll)
+            self.uc.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
+            self.uc.mem_write(start_addr, loaded_dll)
         else:
             with open(f"DLLs/{filename}.ldll", 'rb') as dll:
                 loaded_dll = dll.read()
-                self.state.uc.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
-                self.state.uc.mem_write(start_addr, loaded_dll)
+                self.uc.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
+                self.uc.mem_write(start_addr, loaded_dll)
 
     def init_uc(self):
         # Calculate required memory
         pe = pefile.PE(self.sample.path)
-        self.state.BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
-        self.sample.unpacker.BASE_ADDR = self.state.BASE_ADDR
-        self.state.virtualmemorysize = self.getVirtualMemorySize()
-        self.state.STACK_ADDR = 0x0
-        self.state.STACK_SIZE = 1024 * 1024
-        STACK_START = self.state.STACK_ADDR + self.state.STACK_SIZE
-        #self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.state.STACK_ADDR, "vsize": self.state.STACK_SIZE}]
+        self.sample.BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
+        self.sample.unpacker.BASE_ADDR = self.sample.BASE_ADDR
+        self.sample.virtualmemorysize = self.getVirtualMemorySize()
+        self.STACK_ADDR = 0x0
+        self.STACK_SIZE = 1024 * 1024
+        STACK_START = self.STACK_ADDR + self.STACK_SIZE
+        #self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.STACK_ADDR, "vsize": self.STACK_SIZE}]
         stack_sec_header = IMAGE_SECTION_HEADER(
             "stack".encode('ascii'),
-            self.state.STACK_SIZE,
-            self.state.STACK_ADDR,
-            self.state.STACK_SIZE,
+            self.STACK_SIZE,
+            self.STACK_ADDR,
+            self.STACK_SIZE,
             0,
             0,
             0,
@@ -404,18 +384,18 @@ class UnpackerEngine(object):
             0,
         )
         self.sample.unpacker.secs.append(SectionHeader(stack_sec_header))
-        self.state.HOOK_ADDR = STACK_START + 0x3000 + 0x1000
+        self.HOOK_ADDR = STACK_START + 0x3000 + 0x1000
 
         # Start unicorn emulator with x86-32bit architecture
-        self.state.uc = Uc(UC_ARCH_X86, UC_MODE_32)
-        if self.state.startaddr is None:
-            self.state.startaddr = self.entrypoint(pe)
-        self.state.loaded_image = pe.get_memory_mapped_image(ImageBase=self.state.BASE_ADDR)
-        self.state.virtualmemorysize = align(self.state.virtualmemorysize + 0x10000,
+        self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
+        if self.sample.unpacker.startaddr is None:
+            self.sample.unpacker.startaddr = self.entrypoint(pe)
+        self.sample.loaded_image = pe.get_memory_mapped_image(ImageBase=self.sample.BASE_ADDR)
+        self.sample.virtualmemorysize = align(self.sample.virtualmemorysize + 0x10000,
                                              page_size=4096)  # Space possible IAT rebuilding
-        self.sample.unpacker.virtualmemorysize = self.state.virtualmemorysize
-        self.state.uc.mem_map(self.state.BASE_ADDR, self.state.virtualmemorysize)
-        self.state.uc.mem_write(self.state.BASE_ADDR, self.state.loaded_image)
+        self.sample.unpacker.virtualmemorysize = self.sample.virtualmemorysize
+        self.uc.mem_map(self.sample.BASE_ADDR, self.sample.virtualmemorysize)
+        self.uc.mem_write(self.sample.BASE_ADDR, self.sample.loaded_image)
 
         self.setup_processinfo()
 
@@ -425,44 +405,44 @@ class UnpackerEngine(object):
         self.load_dll("DLLs/ntdll.dll", 0x77400000)
 
         # initialize machine registers
-        self.state.uc.mem_map(self.state.STACK_ADDR, self.state.STACK_SIZE)
-        self.state.uc.reg_write(UC_X86_REG_ESP, self.state.STACK_ADDR + int(self.state.STACK_SIZE / 2))
-        self.state.uc.reg_write(UC_X86_REG_EBP, self.state.STACK_ADDR + int(self.state.STACK_SIZE / 2))
-        self.state.uc.mem_write(self.state.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1]))
-        self.state.uc.reg_write(UC_X86_REG_ECX, self.state.startaddr)
-        self.state.uc.reg_write(UC_X86_REG_EDX, self.state.startaddr)
-        self.state.uc.reg_write(UC_X86_REG_ESI, self.state.startaddr)
-        self.state.uc.reg_write(UC_X86_REG_EDI, self.state.startaddr)
+        self.uc.mem_map(self.STACK_ADDR, self.STACK_SIZE)
+        self.uc.reg_write(UC_X86_REG_ESP, self.STACK_ADDR + int(self.STACK_SIZE / 2))
+        self.uc.reg_write(UC_X86_REG_EBP, self.STACK_ADDR + int(self.STACK_SIZE / 2))
+        self.uc.mem_write(self.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1]))
+        self.uc.reg_write(UC_X86_REG_ECX, self.sample.unpacker.startaddr)
+        self.uc.reg_write(UC_X86_REG_EDX, self.sample.unpacker.startaddr)
+        self.uc.reg_write(UC_X86_REG_ESI, self.sample.unpacker.startaddr)
+        self.uc.reg_write(UC_X86_REG_EDI, self.sample.unpacker.startaddr)
 
         # setup section dict used for custom memory protection
         atn = {}  # Dict Address to Name: (StartVAddr, EndVAddr) -> Name
         ntp = {}  # Dict Name to Protection Tupel: Name -> (Execute, Read, Write)
 
-        new_pe = PE(self.state.uc, self.state.BASE_ADDR)
+        new_pe = PE(self.uc, self.sample.BASE_ADDR)
         prot_val = lambda x, y: True if x & y != 0 else False
         for s in new_pe.section_list:
             atn[(
-                s.VirtualAddress + self.state.BASE_ADDR,
-                s.VirtualAddress + self.state.BASE_ADDR + s.VirtualSize)] = convert_to_string(
+                s.VirtualAddress + self.sample.BASE_ADDR,
+                s.VirtualAddress + self.sample.BASE_ADDR + s.VirtualSize)] = convert_to_string(
                 s.Name)
             ntp[convert_to_string(s.Name)] = (
                 prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000),
                 prot_val(s.Characteristics, 0x80000000))
 
         # for s in pe.sections:
-        #    atn[(s.VirtualAddress + self.state.BASE_ADDR, s.VirtualAddress + self.state.BASE_ADDR + s.Misc_VirtualSize)] = s.Name
+        #    atn[(s.VirtualAddress + self.sample.BASE_ADDR, s.VirtualAddress + self.sample.BASE_ADDR + s.Misc_VirtualSize)] = s.Name
         #    ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
 
         # init syscall handling and prepare hook memory for return values
-        self.state.apicall_handler = WinApiCalls(self.state.BASE_ADDR, self.state.virtualmemorysize,
-                                                 self.state.HOOK_ADDR, self.state.breakpoints,
+        self.apicall_handler = WinApiCalls(self.sample.BASE_ADDR, self.sample.virtualmemorysize,
+                                                 self.HOOK_ADDR, self.breakpoints,
                                                  self.sample.path, atn, ntp)
-        self.state.uc.mem_map(self.state.HOOK_ADDR, 0x1000)
-        #self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.state.HOOK_ADDR, "vsize": 0x1000}]
+        self.uc.mem_map(self.HOOK_ADDR, 0x1000)
+        #self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.HOOK_ADDR, "vsize": 0x1000}]
         hook_sec_header = IMAGE_SECTION_HEADER(
             "hooks".encode('ascii'),
             0x1000,
-            self.state.HOOK_ADDR,
+            self.HOOK_ADDR,
             0x1000,
             0,
             0,
@@ -474,49 +454,49 @@ class UnpackerEngine(object):
         self.sample.unpacker.secs.append(SectionHeader(stack_sec_header))
 
 
-        hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', self.state.HOOK_ADDR) + bytes.fromhex(
+        hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', self.HOOK_ADDR) + bytes.fromhex(
             'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
-        self.state.uc.mem_write(self.state.HOOK_ADDR, hexstr)
+        self.uc.mem_write(self.HOOK_ADDR, hexstr)
 
         # handle imports
         for lib in pe.DIRECTORY_ENTRY_IMPORT:
             for func in lib.imports:
                 func_name = func.name.decode() if func.name is not None else f"no name: 0x{func.address:02x}"
                 dll_name = lib.dll.decode() if lib.dll is not None else "-- unknown --"
-                self.state.imports.add(func_name)
-                curr_hook_addr = self.state.apicall_handler.add_hook(self.state.uc, func_name, dll_name)
-                self.state.uc.mem_write(func.address, struct.pack('<I', curr_hook_addr))
+                self.sample.imports.add(func_name)
+                curr_hook_addr = self.apicall_handler.add_hook(self.uc, func_name, dll_name)
+                self.uc.mem_write(func.address, struct.pack('<I', curr_hook_addr))
 
-        hdr = PE(self.state.uc, self.state.BASE_ADDR)
+        hdr = PE(self.uc, self.sample.BASE_ADDR)
 
         # TODO below new version but needs testing as it is crashing
-        # import_table = get_imp(self.state.uc, hdr.data_directories[1].VirtualAddress, self.state.BASE_ADDR, hdr.data_directories[1].Size, True)
+        # import_table = get_imp(self.uc, hdr.data_directories[1].VirtualAddress, self.sample.BASE_ADDR, hdr.data_directories[1].Size, True)
         # for lib in import_table:
         #    for func_name, func_addr in lib.imports:
         #        func_name = func_name if func_name is not None else f"no name: 0x{func_addr:02x}"
         #        dll_name = lib.Name if lib.Name is not None else "-- unknown --"
-        #        self.state.imports.add(func_name)
-        #        curr_hook_addr = self.state.apicall_handler.add_hook(self.state.uc, func_name, dll_name)
-        #        self.state.uc.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
+        #        self.sample.imports.add(func_name)
+        #        curr_hook_addr = self.apicall_handler.add_hook(self.uc, func_name, dll_name)
+        #        self.uc.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
 
         # Patch DLLs with hook
         # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll
-        self.state.apicall_handler.add_hook(self.state.uc, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
-        self.state.apicall_handler.add_hook(self.state.uc, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
-        self.state.apicall_handler.add_hook(self.state.uc, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)
-        self.state.apicall_handler.add_hook(self.state.uc, "LoadLibraryA", "KernelBase.dll", 0x73D00000 + 0xf20d0)
-        self.state.apicall_handler.add_hook(self.state.uc, "GetProcAddress", "KernelBase.dll", 0x73D00000 + 0x102870)
+        self.apicall_handler.add_hook(self.uc, "VirtualProtect", "KernelBase.dll", 0x73D00000 + 0x1089f0)
+        self.apicall_handler.add_hook(self.uc, "VirtualAlloc", "KernelBase.dll", 0x73D00000 + 0xd4600)
+        self.apicall_handler.add_hook(self.uc, "VirtualFree", "KernelBase.dll", 0x73D00000 + 0xd4ae0)
+        self.apicall_handler.add_hook(self.uc, "LoadLibraryA", "KernelBase.dll", 0x73D00000 + 0xf20d0)
+        self.apicall_handler.add_hook(self.uc, "GetProcAddress", "KernelBase.dll", 0x73D00000 + 0x102870)
 
-        self.state.apicall_handler.add_hook(self.state.uc, "VirtualProtect", "kernel32.dll", 0x755D0000 + 0x16760)
-        self.state.apicall_handler.add_hook(self.state.uc, "VirtualAlloc", "kernel32.dll", 0x755D0000 + 0x166a0)
-        self.state.apicall_handler.add_hook(self.state.uc, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
-        self.state.apicall_handler.add_hook(self.state.uc, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
-        self.state.apicall_handler.add_hook(self.state.uc, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
+        self.apicall_handler.add_hook(self.uc, "VirtualProtect", "kernel32.dll", 0x755D0000 + 0x16760)
+        self.apicall_handler.add_hook(self.uc, "VirtualAlloc", "kernel32.dll", 0x755D0000 + 0x166a0)
+        self.apicall_handler.add_hook(self.uc, "VirtualFree", "kernel32.dll", 0x755D0000 + 0x16700)
+        self.apicall_handler.add_hook(self.uc, "LoadLibraryA", "kernel32.dll", 0x755D0000 + 0x157b0)
+        self.apicall_handler.add_hook(self.uc, "GetProcAddress", "kernel32.dll", 0x755D0000 + 0x14ee0)
 
         # Add hooks
-        self.state.uc.hook_add(UC_HOOK_CODE, self.hook_code)
-        self.state.uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE | UC_HOOK_MEM_FETCH, self.hook_mem_access)
-        self.state.uc.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, self.hook_mem_invalid)
+        self.uc.hook_add(UC_HOOK_CODE, self.hook_code)
+        self.uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE | UC_HOOK_MEM_FETCH, self.hook_mem_access)
+        self.uc.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, self.hook_mem_invalid)
 
 
 if __name__ == '__main__':

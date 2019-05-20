@@ -7,7 +7,7 @@ from unicorn import UcError
 from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
     _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR, SectionHeader, DosHeader, PEHeader, OptionalHeader, \
     ImportDescriptor, DataDirectory
-from utils import InvalidPEFile, ImportValues, get_string
+from utils import InvalidPEFile, ImportValues, get_string, print_cols
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -138,7 +138,8 @@ def parse_disk_to_header(sample, query_header=None):
         if query_header == "IMAGE_SECTION_HEADER":
             return section_headers
 
-        headers = {"_IMAGE_DOS_HEADER": dos_header, "_IMAGE_FILE_HEADER": pe_header, "_IMAGE_OPTIONAL_HEADER": opt_header,
+        headers = {"_IMAGE_DOS_HEADER": dos_header, "_IMAGE_FILE_HEADER": pe_header,
+                   "_IMAGE_OPTIONAL_HEADER": opt_header,
                    "IMAGE_SECTION_HEADER": section_headers, "IMPORTS": import_table, }
 
         return headers
@@ -169,7 +170,6 @@ def conv_to_class_header(header):
                 if isinstance(new_header, OptionalHeader):
                     new_header.DataDirectory = conv_to_class_header(new_header.DataDirectory)
                 return new_header
-
 
 
 def parse_memory_to_header(uc, base_addr, query_header=None):
@@ -302,7 +302,7 @@ def print_struc(s, offset, name):
 
 def print_struc_rec(s, offset, name, indent='\t', array_dict=None):
     if name is not None:
-        print(name + ":")
+        print(f"\x1b[33m{name}:\x1b[0m")
     for field_name, field_type in s._fields_:
         if isinstance(getattr(s, field_name), Array):
             print(indent + f" +0x{offset:02x} {field_name}:")
@@ -320,9 +320,11 @@ def print_struc_rec(s, offset, name, indent='\t', array_dict=None):
             if isinstance(getattr(s, field_name), int):
                 if "TimeDateStamp" in field_name:
                     print(f"{indent} +0x{offset:02x} {field_name}: "
-                          f"{datetime.utcfromtimestamp(getattr(s, field_name)).strftime('%Y-%m-%d %H:%M:%S')}")
+                          "\x1b[31m"
+                          f"{datetime.utcfromtimestamp(getattr(s, field_name)).strftime('%Y-%m-%d %H:%M:%S')}"
+                          "\x1b[0m")
                 else:
-                    print(f"{indent} +0x{offset:02x} {field_name}: {hex(getattr(s, field_name))}")
+                    print(f"{indent} +0x{offset:02x} {field_name}: \x1b[31m{hex(getattr(s, field_name))}\x1b[0m")
             else:
                 print(f"\t +0x{offset:02x} {field_name}: {getattr(s, field_name)}")
             offset += len(bytes(field_type()))
@@ -359,16 +361,16 @@ def print_section_table(uc, base_addr):
 
 def print_iat(uc, base_addr):
     imp = parse_memory_to_header(uc, base_addr, "IMPORTS")
-    print("IMPORT ADDRESS TABLE:")
+    print("\x1b[33mIMPORT ADDRESS TABLE:\x1b[0m")
     for i in imp:
         indent = '\t'
         if i.Name == 0:
             return
-        print(f"{indent} Name: {get_string(base_addr + i.Name, uc)}")
-        print(f"{indent} Characteristics (Hint/Name): {hex(i.Characteristics)}")
-        print(f"{indent} TimeDateStamp: {hex(i.TimeDateStamp)}")
-        print(f"{indent} ForwarderChain: {hex(i.ForwarderChain)}")
-        print(f"{indent} FirstThunk: {hex(i.FirstThunk)}")
+        print(f"{indent} Name: \x1b[31m{get_string(base_addr + i.Name, uc)}\x1b[0m")
+        print(f"{indent} Characteristics (Hint/Name): \x1b[31m{hex(i.Characteristics)}\x1b[0m")
+        print(f"{indent} TimeDateStamp: \x1b[31m{hex(i.TimeDateStamp)}\x1b[0m")
+        print(f"{indent} ForwarderChain: \x1b[31m{hex(i.ForwarderChain)}\x1b[0m")
+        print(f"{indent} FirstThunk: \x1b[31m{hex(i.FirstThunk)}\x1b[0m")
         indent = '\t\t'
 
         if i.Characteristics == 0:
@@ -381,9 +383,10 @@ def print_iat(uc, base_addr):
                 continue
             while imp_array_element != 0:
                 if imp_array_element >> 0x1f == 1:
-                    print(f"{indent} Import by Ordinal: {hex(imp_array_element - 0x80000000)}")
+                    print(f"{indent} Import by Ordinal: \x1b[31m{hex(imp_array_element - 0x80000000)}\x1b[0m")
                 else:
-                    print(f"{indent} Import by Name: {get_string(base_addr + imp_array_element + 0x2, uc)}")
+                    print(f"{indent} Import by Name: "
+                          f"\x1b[31m{get_string(base_addr + imp_array_element + 0x2, uc)}\x1b[0m")
                 curr_pos += 0x4
                 imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics + curr_pos, 4))[0]
 

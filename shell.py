@@ -14,7 +14,7 @@ from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC
 
 from headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, print_section_table, \
     pe_write
-from unipacker import UnpackerClient, State, UnpackerEngine, Sample
+from unipacker import UnpackerClient, UnpackerEngine, Sample
 from utils import get_reg_values, get_string, print_cols, merge, remove_range
 
 _print = builtins.print
@@ -28,6 +28,7 @@ class Shell(Cmd, UnpackerClient):
             builtins.print = self.shell_print
             self.histfile = ".unpacker_history"
             self.clear_queue = False
+            self.sample = None
             while True:
                 self.sample_loop()
                 self.shell_event.wait()
@@ -44,12 +45,12 @@ class Shell(Cmd, UnpackerClient):
 
     def sample_loop(self):
         sample_path, known_samples = self.get_path_from_user()
-        for sample in Sample.get_samples(sample_path):
-            print(f"\nNext up: {sample}")
+        for self.sample in Sample.get_samples(sample_path):
+            print(f"\nNext up: {self.sample}")
             with open(".unpacker_history", "w") as f:
-                f.writelines("\n".join(sorted(set([f"{sample.yara_matches[-1]};{sample.path}"] + known_samples))))
+                f.writelines("\n".join(sorted(set([f"{self.sample.yara_matches[-1]};{self.sample.path}"] + known_samples))))
 
-            self.init_engine(sample)
+            self.init_engine()
 
             with open("fortunes") as f:
                 fortunes = f.read().splitlines()
@@ -58,15 +59,14 @@ class Shell(Cmd, UnpackerClient):
             if self.clear_queue:
                 break
 
-    def init_engine(self, sample):
+    def init_engine(self):
         self.started = False
         self.rules = None
         self.address = None
-        self.state = State()
         self.shell_event = threading.Event()
-        self.engine = UnpackerEngine(self.state, sample)
+        self.engine = UnpackerEngine(self.sample)
         self.engine.register_client(self)
-        self.address_updated(self.state.startaddr)
+        self.address_updated(self.sample.unpacker.startaddr)
 
     def get_path_from_user(self):
         with open("banner") as f:
@@ -131,12 +131,12 @@ class Shell(Cmd, UnpackerClient):
         self.shell_event.wait()
 
     def try_parse_address(self, addr):
-        if addr in self.state.apicall_handler.hooks:
-            return f"0x{addr:02x} ({self.state.apicall_handler.hooks[addr]})"
+        if addr in self.engine.apicall_handler.hooks:
+            return f"0x{addr:02x} ({self.engine.apicall_handler.hooks[addr]})"
         return f"0x{addr:02x}"
 
     def print_regs(self, args=None):
-        reg_values = get_reg_values(self.state.uc)
+        reg_values = get_reg_values(self.engine.uc)
 
         if not args:
             regs = reg_values.keys()
@@ -152,7 +152,7 @@ class Shell(Cmd, UnpackerClient):
 
         string = None
         if t == "str":
-            string = get_string(base, self.state.uc)
+            string = get_string(base, self.engine.uc)
             t = "byte"
             num_elements = len(string)
 
@@ -162,26 +162,26 @@ class Shell(Cmd, UnpackerClient):
         }
         fmt, size = types[t]
         for i in range(num_elements):
-            item, = struct.unpack(fmt, self.state.uc.mem_read(base + i * size, size))
+            item, = struct.unpack(fmt, self.engine.uc.mem_read(base + i * size, size))
             print(f"{base_alias}+{i * 4} = 0x{item:02x}")
 
         if string is not None:
             print(f"String @0x{base:02x}: {string}")
 
     def print_stack(self, elements):
-        esp = self.state.uc.reg_read(UC_X86_REG_ESP)
-        self.print_mem(self.state.uc, esp, elements, base_alias="ESP")
+        esp = self.engine.uc.reg_read(UC_X86_REG_ESP)
+        self.print_mem(self.engine.uc, esp, elements, base_alias="ESP")
 
     def print_imports(self, args):
         lines_static = []
         lines_dynamic = []
 
-        for addr, name in self.state.apicall_handler.hooks.items():
+        for addr, name in self.engine.apicall_handler.hooks.items():
             try:
-                module = self.state.apicall_handler.module_for_function[name]
+                module = self.engine.apicall_handler.module_for_function[name]
             except KeyError:
                 module = "?"
-            if name in self.state.imports:
+            if name in self.sample.imports:
                 lines_static += [(f"0x{addr:02x}", name, module)]
             else:
                 lines_dynamic += [(f"0x{addr:02x}", name, module)]
@@ -192,39 +192,39 @@ class Shell(Cmd, UnpackerClient):
         print_cols(lines_dynamic)
 
     def print_stats(self):
-        duration = time() - self.state.start
+        duration = time() - self.engine.start
         hours, rest = divmod(duration, 3600)
         minutes, seconds = divmod(rest, 60)
         print(f"\x1b[31mTime wasted emulating:\x1b[0m {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
         print("\x1b[31mAPI calls:\x1b[0m")
-        print_cols([(name, amount) for name, amount in self.state.apicall_counter.items()])
+        print_cols([(name, amount) for name, amount in self.engine.apicall_counter.items()])
         print("\n\x1b[31mInstructions executed in sections:\x1b[0m")
-        print_cols([(name, amount) for name, amount in self.state.sections_executed.items()])
+        print_cols([(name, amount) for name, amount in self.engine.sections_executed.items()])
         print("\n\x1b[31mRead accesses:\x1b[0m")
-        print_cols([(name, amount) for name, amount in self.state.sections_read.items()])
+        print_cols([(name, amount) for name, amount in self.engine.sections_read.items()])
         print("\n\x1b[31mWrite accesses:\x1b[0m")
-        print_cols([(name, amount) for name, amount in self.state.sections_written.items()])
+        print_cols([(name, amount) for name, amount in self.engine.sections_written.items()])
 
     def do_aaa(self, args):
         """Analyze absolutely all: Show a collection of stats about the current sample"""
         print("\x1b[31mFile analysis:\x1b[0m")
         print_cols([
-            ("YARA:", ", ".join(map(str, self.state.yara_matches))),
-            ("Chosen unpacker:", self.state.unpacker.__class__.__name__),
-            ("Allowed sections:", ', '.join(self.state.unpacker.allowed_sections)),
+            ("YARA:", ", ".join(map(str, self.sample.yara_matches))),
+            ("Chosen unpacker:", self.sample.unpacker.__class__.__name__),
+            ("Allowed sections:", ', '.join(self.sample.unpacker.allowed_sections)),
             ("End of unpacking stub:",
-             f"0x{self.state.endaddr:02x}" if self.state.endaddr != sys.maxsize else "unknown"),
-            ("Section hopping detection:", "active" if self.state.section_hopping_control else "inactive"),
-            ("Write+Exec detection:", "active" if self.state.write_execute_control else "inactive")
+             f"0x{self.sample.unpacker.endaddr:02x}" if self.sample.unpacker.endaddr != sys.maxsize else "unknown"),
+            ("Section hopping detection:", "active" if self.sample.unpacker.section_hopping_control else "inactive"),
+            ("Write+Exec detection:", "active" if self.sample.unpacker.write_execute_control else "inactive")
         ])
         print("\n\x1b[31mPE stats:\x1b[0m")
         print_cols([
-            ("Declared virtual memory size:", f"0x{self.state.virtualmemorysize:02x}", "", ""),
-            ("Actual loaded image size:", f"0x{len(self.state.loaded_image):02x}", "", ""),
-            ("Image base address:", f"0x{self.state.BASE_ADDR:02x}", "", ""),
-            ("Mapped stack space:", f"0x{self.state.STACK_ADDR:02x}", "-",
-             f"0x{self.state.STACK_ADDR + self.state.STACK_SIZE:02x}"),
-            ("Mapped hook space:", f"0x{self.state.HOOK_ADDR:02x}", "-", f"0x{self.state.HOOK_ADDR + 0x1000:02x}")
+            ("Declared virtual memory size:", f"0x{self.sample.virtualmemorysize:02x}", "", ""),
+            ("Actual loaded image size:", f"0x{len(self.sample.loaded_image):02x}", "", ""),
+            ("Image base address:", f"0x{self.sample.BASE_ADDR:02x}", "", ""),
+            ("Mapped stack space:", f"0x{self.engine.STACK_ADDR:02x}", "-",
+             f"0x{self.engine.STACK_ADDR + self.engine.STACK_SIZE:02x}"),
+            ("Mapped hook space:", f"0x{self.engine.HOOK_ADDR:02x}", "-", f"0x{self.engine.HOOK_ADDR + 0x1000:02x}")
         ])
         self.do_i("i")
         print("\n\x1b[31mRegister status:\x1b[0m")
@@ -235,7 +235,7 @@ class Shell(Cmd, UnpackerClient):
 boring static information. 'Auto-aaa' lets you get your hands dirty with emulation after
 a quick glance at sample infos, without having to type 'r' yourself"""
         self.do_aaa(args)
-        if any([self.state.log_instr, self.state.log_mem_read, self.state.log_mem_write]):
+        if any([self.engine.log_instr, self.engine.log_mem_read, self.engine.log_mem_write]):
             sleep(2)
         self.do_r(args)
 
@@ -270,7 +270,7 @@ Show current breakpoints:   b"""
             if not arg:
                 continue
             if arg == "stack":
-                mem_targets += [(self.state.STACK_ADDR, self.state.STACK_ADDR + self.state.STACK_SIZE)]
+                mem_targets += [(self.engine.STACK_ADDR, self.engine.STACK_ADDR + self.engine.STACK_SIZE)]
             elif "m" == arg[0]:
                 try:
                     parts = list(map(lambda p: int(p, 0), arg[1:].split("-")))
@@ -284,33 +284,33 @@ Show current breakpoints:   b"""
                     print(f"Error parsing address or range {arg}")
             elif "$" == arg[0]:
                 arg = arg[1:]
-                if arg in self.state.apicall_handler.hooks.values():
-                    for addr, func_name in self.state.apicall_handler.hooks.items():
+                if arg in self.engine.apicall_handler.hooks.values():
+                    for addr, func_name in self.engine.apicall_handler.hooks.items():
                         if arg == func_name:
                             code_targets += [addr]
                             break
                 else:
-                    self.state.apicall_handler.register_pending_breakpoint(arg)
+                    self.engine.apicall_handler.register_pending_breakpoint(arg)
             else:
                 try:
                     code_targets += [int(arg, 0)]
                 except ValueError:
                     print(f"Error parsing address {arg}")
-        with self.state.data_lock:
-            self.state.breakpoints.update(code_targets)
-            self.state.mem_breakpoints = list(merge(self.state.mem_breakpoints + mem_targets))
+        with self.engine.data_lock:
+            self.engine.breakpoints.update(code_targets)
+            self.engine.mem_breakpoints = list(merge(self.engine.mem_breakpoints + mem_targets))
             self.print_breakpoints()
 
     def print_breakpoints(self):
-        current_breakpoints = list(map(self.try_parse_address, self.state.breakpoints))
-        current_breakpoints += list(map(lambda b: f'{b} (pending)', self.state.apicall_handler.pending_breakpoints))
+        current_breakpoints = list(map(self.try_parse_address, self.engine.breakpoints))
+        current_breakpoints += list(map(lambda b: f'{b} (pending)', self.engine.apicall_handler.pending_breakpoints))
         print(f"Current breakpoints: {current_breakpoints}")
         current_mem_breakpoints = []
-        for lower, upper in self.state.mem_breakpoints:
-            if lower == self.state.STACK_ADDR and upper == self.state.STACK_ADDR + self.state.STACK_SIZE:
+        for lower, upper in self.engine.mem_breakpoints:
+            if lower == self.engine.STACK_ADDR and upper == self.engine.STACK_ADDR + self.engine.STACK_SIZE:
                 current_mem_breakpoints += ["complete stack"]
             else:
-                stack = lower >= self.state.STACK_ADDR and upper <= self.state.STACK_ADDR + self.state.STACK_SIZE
+                stack = lower >= self.engine.STACK_ADDR and upper <= self.engine.STACK_ADDR + self.engine.STACK_SIZE
                 text = f"0x{lower:02x}" + (f" - 0x{upper:02x}" if upper != lower else "")
                 current_mem_breakpoints += [text + (" (stack)" if stack else "")]
         print(f"Current mem breakpoints: {current_mem_breakpoints}")
@@ -323,8 +323,16 @@ Show current breakpoints:   b"""
             print("Emulation not started yet. Starting now...")
             self.do_r(args)
 
-    # TODO do documentation
-    def do_p(self, args):
+    def do_hprint(self, args):
+        """Print selected headers from the current sample
+
+Usage:              hprint [HEADERS]
+Headers:
+    d,  dos         DOS header
+    p,  pe          PE header
+    o,  opt         Optional header
+    s,  sections    Section table
+    a,  all         All headers"""
 
         mapping = {
             "d": print_dos_header,
@@ -343,7 +351,7 @@ Show current breakpoints:   b"""
 
         for x in args_list:
             if x in mapping.keys():
-                mapping[x](self.state.uc, self.state.BASE_ADDR)
+                mapping[x](self.engine.uc, self.sample.BASE_ADDR)
 
     def do_dump(self, args):
         """Dump the emulated memory to file.
@@ -360,13 +368,13 @@ data at the right offsets.
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
             args = args or "unpacked.exe"
-            self.state.unpacker.dump(self.state.uc, self.state.apicall_handler, path=args)
+            self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler, path=args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
 
     def do_onlydmp(self, args):
         args = args or "dump"
-        pe_write(self.state.uc, self.state.BASE_ADDR, self.state.virtualmemorysize, args)
+        pe_write(self.engine.uc, self.sample.BASE_ADDR, self.sample.virtualmemorysize, args)
 
     def do_i(self, args):
         """Get status information
@@ -391,7 +399,7 @@ Static and dynamic imports are shown with their respective stub addresses in the
     def do_x(self, args):
         """Dump memory at a specific address.
 
-Usage:          x[/n] [{FORMAT}] LOCATION
+Usage:      x[/n] [{FORMAT}] LOCATION
 Options:
     n       integer, how many items should be displayed
 
@@ -411,19 +419,19 @@ Location:   address (decimal or hexadecimal form) or a $-prefixed register name 
 
             if "$" in addr:
                 alias = addr[1:]
-                addr = get_reg_values()[alias]
+                addr = get_reg_values(self.engine.uc)[alias]
             else:
                 alias = ""
                 addr = int(addr, 0)
 
-            self.print_mem(self.state.uc, addr, n, t, alias)
+            self.print_mem(addr, n, t, alias)
         except Exception as e:
             print(f"Error parsing command: {e}")
 
-    def do_set(self, args):
+    def do_valset(self, args):
         """Set memory at a specific address to a custom value
 
-Usage:      set [{FORMAT}] OPERATION LOCATION
+Usage:      valset [{FORMAT}] OPERATION LOCATION
 Format:     either 'byte', 'int' (32bit) or 'str' (zero-terminated string)
 Operation:  modifies the old value instead of overwriting it (anything else than '=' is disregarded in str mode!)
             either = (set), += (add to), *= (multiply with) or /= (divide by)
@@ -447,7 +455,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
             reg, op, value = result[0]
             try:
                 value = int(value, 0)
-                old_value = get_reg_values()[reg]
+                old_value = get_reg_values(self.engine.uc)[reg]
                 if op == "+=":
                     value += old_value
                 elif op == "-=":
@@ -456,7 +464,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
                     value *= old_value
                 elif op == "/=":
                     value = old_value // value
-                self.state.uc.reg_write(regs[reg], value)
+                self.engine.uc.reg_write(regs[reg], value)
             except Exception as e:
                 print(f"Error: {e}")
             return
@@ -479,7 +487,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
 
                 if fmt:
                     value = int(value, 0)
-                    old_value, = struct.unpack(fmt, self.state.uc.mem_read(addr, size))
+                    old_value, = struct.unpack(fmt, self.engine.uc.mem_read(addr, size))
                     if op == "+=":
                         value += old_value
                     elif op == "-=":
@@ -491,7 +499,7 @@ Location:   address (decimal or hexadecimal form) for memory writing, or a $-pre
                     to_write = struct.pack(fmt, value)
                 else:
                     to_write = (value + "\x00").encode()
-                self.state.uc.mem_write(addr, to_write)
+                self.engine.uc.mem_write(addr, to_write)
             except Exception as e:
                 print(f"Error: {e}")
 
@@ -517,10 +525,10 @@ Options:
     wx, write_exec  Stop emulation when an instruction would be executed that has been modified before. Note that if the
                     unpacking stub is self-modifying, this detection will raise some false-positives instead of finding
                     the unpacked code."""
-        self.state.section_hopping_control = any(x in args for x in ["h", "hop"])
-        print(f"[{'x' if self.state.section_hopping_control else ' '}] section hopping detection")
-        self.state.write_execute_control = any(x in args for x in ["wx", "write_exec"])
-        print(f"[{'x' if self.state.write_execute_control else ' '}] Write+Exec detection")
+        self.sample.unpacker.section_hopping_control = any(x in args for x in ["h", "hop"])
+        print(f"[{'x' if self.sample.unpacker.section_hopping_control else ' '}] section hopping detection")
+        self.sample.unpacker.write_execute_control = any(x in args for x in ["wx", "write_exec"])
+        print(f"[{'x' if self.sample.unpacker.write_execute_control else ' '}] Write+Exec detection")
 
     def do_nxtsample(self, args):
         """Close the current sample and go to the next one (if available),
@@ -554,14 +562,14 @@ deleted this time."""
         code_targets = []
         mem_targets = []
         if not args:
-            self.state.breakpoints.clear()
-            self.state.mem_breakpoints.clear()
-            self.state.apicall_handler.pending_breakpoints.clear()
+            self.engine.breakpoints.clear()
+            self.engine.mem_breakpoints.clear()
+            self.engine.apicall_handler.pending_breakpoints.clear()
         for arg in args.split(" "):
             if not arg:
                 continue
             if arg == "stack":
-                mem_targets += [(self.state.STACK_ADDR, self.state.STACK_ADDR + self.state.STACK_SIZE)]
+                mem_targets += [(self.engine.STACK_ADDR, self.engine.STACK_ADDR + self.engine.STACK_SIZE)]
             elif "m" == arg[0]:
                 try:
                     parts = list(map(lambda p: int(p, 0), arg[1:].split("-")))
@@ -575,13 +583,13 @@ deleted this time."""
                     print(f"Error parsing address or range {arg}")
             elif "$" == arg[0]:
                 arg = arg[1:]
-                if arg in self.state.apicall_handler.hooks.values():
-                    for addr, func_name in self.state.apicall_handler.hooks.items():
+                if arg in self.engine.apicall_handler.hooks.values():
+                    for addr, func_name in self.engine.apicall_handler.hooks.items():
                         if arg == func_name:
                             code_targets += [addr]
                             break
-                elif arg in self.state.apicall_handler.pending_breakpoints:
-                    self.state.apicall_handler.pending_breakpoints.remove(arg)
+                elif arg in self.engine.apicall_handler.pending_breakpoints:
+                    self.engine.apicall_handler.pending_breakpoints.remove(arg)
                 else:
                     print(f"Unknown method {arg}, not imported or used in pending breakpoint")
             else:
@@ -589,17 +597,17 @@ deleted this time."""
                     code_targets += [int(arg, 0)]
                 except ValueError:
                     print(f"Error parsing address {arg}")
-        with self.state.data_lock:
+        with self.engine.data_lock:
             for t in code_targets:
                 try:
-                    self.state.breakpoints.remove(t)
+                    self.engine.breakpoints.remove(t)
                 except KeyError:
                     pass
             new_mem_breakpoints = []
-            for b_lower, b_upper in self.state.mem_breakpoints:
+            for b_lower, b_upper in self.engine.mem_breakpoints:
                 for t_lower, t_upper in mem_targets:
                     new_mem_breakpoints += remove_range((b_lower, b_upper), (t_lower, t_upper))
-            self.state.mem_breakpoints = list(merge(new_mem_breakpoints))
+            self.engine.mem_breakpoints = list(merge(new_mem_breakpoints))
             self.print_breakpoints()
 
     def do_log(self, args):
@@ -617,14 +625,14 @@ Options:
         if args == "a":
             args = "irsw"
         print("Log level:")
-        self.state.log_mem_read = any(x in args for x in ["r", "read"])
-        print(f"[{'x' if self.state.log_mem_read else ' '}] mem read")
-        self.state.log_mem_write = any(x in args for x in ["w", "write"])
-        print(f"[{'x' if self.state.log_mem_write else ' '}] mem write")
-        self.state.log_instr = any(x in args for x in ["i", "instr"])
-        print(f"[{'x' if self.state.log_instr else ' '}] instructions")
-        self.state.log_apicalls = any(x in args for x in ["s", "sys"])
-        print(f"[{'x' if self.state.log_apicalls else ' '}] API calls")
+        self.engine.log_mem_read = any(x in args for x in ["r", "read"])
+        print(f"[{'x' if self.engine.log_mem_read else ' '}] mem read")
+        self.engine.log_mem_write = any(x in args for x in ["w", "write"])
+        print(f"[{'x' if self.engine.log_mem_write else ' '}] mem write")
+        self.engine.log_instr = any(x in args for x in ["i", "instr"])
+        print(f"[{'x' if self.engine.log_instr else ' '}] instructions")
+        self.engine.log_apicalls = any(x in args for x in ["s", "sys"])
+        print(f"[{'x' if self.engine.log_apicalls else ' '}] API calls")
 
     def do_stats(self, args):
         """Print emulation statistics: In which section are the instructions located that were executed, which
@@ -648,7 +656,7 @@ details on this representation)"""
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
         else:
             self.rules = yara.compile(filepath=args)
-        self.state.unpacker.dump(self.state.uc, self.state.apicall_handler)
+        self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler)
         matches = self.rules.match("unpacked.exe")
         print(", ".join(map(str, matches)))
 

@@ -4,7 +4,7 @@ import sys
 import threading
 from unittest import TestCase
 
-from unipacker import State, UnpackerEngine, UnpackerClient, Sample
+from unipacker import UnpackerEngine, UnpackerClient, Sample
 from unpackers import get_unpacker
 
 
@@ -47,17 +47,16 @@ class RepeatedTimer(object):
         self.is_running = False
 
 
-class Test(TestCase):
+class EngineTest(TestCase):
 
     def prepare_test(self, sample_path):
-        state = State()
         sample = Sample(sample_path)
         unpacker, _ = get_unpacker(sample)
         event = threading.Event()
         client = Client(event)
         heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
 
-        engine = UnpackerEngine(state, sample)
+        engine = UnpackerEngine(sample)
         engine.register_client(client)
         heartbeat.start()
         threading.Thread(target=engine.emu).start()
