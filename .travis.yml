@@ -26,6 +26,8 @@ matrix:
       install:
         - pip3 install --user --upgrade pip setuptools pytest
         - pip3 install --user -r requirements.txt
+  allow_failures:
+    - os: windows
 
 script:
   - python3 -m pytest -s
