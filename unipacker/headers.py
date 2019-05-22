@@ -4,10 +4,10 @@ from datetime import datetime
 
 from unicorn import UcError
 
-from pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
+from unipacker.pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
     _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR, SectionHeader, DosHeader, PEHeader, OptionalHeader, \
     ImportDescriptor, DataDirectory
-from utils import InvalidPEFile, ImportValues, get_string, print_cols
+from unipacker.utils import InvalidPEFile, ImportValues, get_string
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40

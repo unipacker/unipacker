@@ -7,8 +7,8 @@ from inspect import signature
 import pefile
 from unicorn.x86_const import UC_X86_REG_EAX
 
-from kernel_structs import _FILETIME
-from utils import align, merge, remove_range, print_cols, get_string, calc_processid, \
+from unipacker.kernel_structs import _FILETIME
+from unipacker.utils import align, merge, remove_range, print_cols, get_string, calc_processid, \
     calc_threadid
 
 apicall_mapping = {}

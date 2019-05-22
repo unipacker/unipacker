@@ -1,9 +1,11 @@
+import os
 import sys
 
 import yara
 
-from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump, PEtiteDump
-from utils import InvalidPEFile
+import unipacker
+from unipacker.imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump, PEtiteDump
+from unipacker.utils import InvalidPEFile
 
 
 class DefaultUnpacker(object):
@@ -232,7 +234,7 @@ def generate_label(l):
 
 
 def get_unpacker(sample, auto_default_unpacker=True):
-    yar = "./packer_signatures.yar"
+    yar = f"{os.path.dirname(unipacker.__file__)}/packer_signatures.yar"
     packer, yara_matches = identifypacker(sample.path, yar)
     packers = {
         "upx": UPXUnpacker,

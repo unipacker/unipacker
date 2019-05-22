@@ -4,8 +4,8 @@ import sys
 import threading
 from unittest import TestCase
 
-from unipacker import UnpackerEngine, UnpackerClient, Sample
-from unpackers import get_unpacker
+from unipacker.core import UnpackerEngine, UnpackerClient, Sample
+from unipacker.unpackers import get_unpacker
 
 
 class Client(UnpackerClient):

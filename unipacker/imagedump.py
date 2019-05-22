@@ -5,10 +5,10 @@ import sys
 import pefile
 from unicorn.x86_const import *
 
-from headers import PE, pe_write
-from pe_structs import _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, \
+from unipacker.headers import PE, pe_write
+from unipacker.pe_structs import _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER, IMAGE_IMPORT_DESCRIPTOR
-from utils import alignments, InvalidPEFile, convert_to_string, print_addr_list, print_chunks
+from unipacker.utils import alignments, InvalidPEFile, convert_to_string, print_addr_list, print_chunks
 
 
 class ImageDump(object):

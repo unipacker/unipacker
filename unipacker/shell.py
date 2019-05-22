@@ -12,10 +12,11 @@ from cmd2 import Cmd
 from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, \
     UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
 
-from headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, print_section_table, \
+import unipacker
+from unipacker.headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, print_section_table, \
     pe_write
-from unipacker import UnpackerClient, UnpackerEngine, Sample
-from utils import get_reg_values, get_string, print_cols, merge, remove_range
+from unipacker.core import UnpackerClient, UnpackerEngine, Sample
+from unipacker.utils import get_reg_values, get_string, print_cols, merge, remove_range
 
 _print = builtins.print
 
@@ -34,7 +35,7 @@ class Shell(Cmd, UnpackerClient):
                 self.shell_event.wait()
 
         except EOFError:
-            with open("fortunes") as f:
+            with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
                 fortunes = f.read().splitlines()
             print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
             sys.exit(0)
@@ -52,7 +53,7 @@ class Shell(Cmd, UnpackerClient):
 
             self.init_engine()
 
-            with open("fortunes") as f:
+            with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
                 fortunes = f.read().splitlines()
             print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
             self.cmdloop()
@@ -69,7 +70,7 @@ class Shell(Cmd, UnpackerClient):
         self.address_updated(self.sample.unpacker.startaddr)
 
     def get_path_from_user(self):
-        with open("banner") as f:
+        with open(f"{os.path.dirname(unipacker.__file__)}/banner") as f:
             print(f.read())
         if not os.path.exists(self.histfile):
             open(self.histfile, "w+").close()
@@ -650,7 +651,7 @@ details on this representation)"""
         if not args:
             if not self.rules:
                 try:
-                    self.rules = yara.compile(filepath="malwrsig.yar")
+                    self.rules = yara.compile(filepath=f"{os.path.dirname(unipacker.__file__)}/malwrsig.yar")
                     print("Default rules file used: malwrsig.yar")
                 except:
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
@@ -666,10 +667,18 @@ details on this representation)"""
             self.shell_event.clear()
             self.engine.stop()
             self.shell_event.wait()
-        with open("fortunes") as f:
+        with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
             fortunes = f.read().splitlines()
         print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
         self.exit_code = 0
         return super().do_eof(args)
 
     do_exit = do_eof
+
+
+def main():
+    Shell()
+
+
+if __name__ == '__main__':
+    main()

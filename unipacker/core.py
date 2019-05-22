@@ -8,12 +8,12 @@ import pefile
 from unicorn import *
 from unicorn.x86_const import *
 import collections
-from apicalls import WinApiCalls
-from headers import PE, get_disk_headers, conv_to_class_header, parse_disk_to_header
-from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
-from pe_structs import SectionHeader, IMAGE_SECTION_HEADER, ImportDescriptor, Import
-from unpackers import get_unpacker
-from utils import merge, align, convert_to_string, InvalidPEFile, fix_section_names
+from unipacker.apicalls import WinApiCalls
+from unipacker.headers import PE, get_disk_headers, conv_to_class_header, parse_disk_to_header
+from unipacker.kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
+from unipacker.pe_structs import SectionHeader, IMAGE_SECTION_HEADER, ImportDescriptor, Import
+from unipacker.unpackers import get_unpacker
+from unipacker.utils import merge, align, convert_to_string, InvalidPEFile, fix_section_names
 
 
 class Sample(object):
@@ -360,15 +360,15 @@ class UnpackerEngine(object):
 
     def load_dll(self, path_dll, start_addr):
         filename = os.path.splitext(os.path.basename(path_dll))[0]
-        if not os.path.exists(f"DLLs/{filename}.ldll"):
+        if not os.path.exists(f"{os.path.dirname(unipacker.__file__)}/DLLs/{filename}.ldll"):
             dll = pefile.PE(path_dll)
             loaded_dll = dll.get_memory_mapped_image(ImageBase=start_addr)
-            with open(f"DLLs/{filename}.ldll", 'wb') as f:
+            with open(f"{os.path.dirname(unipacker.__file__)}/DLLs/{filename}.ldll", 'wb') as f:
                 f.write(loaded_dll)
             self.uc.mem_map(start_addr, align(len(loaded_dll) + 0x1000))
             self.uc.mem_write(start_addr, loaded_dll)
         else:
-            with open(f"DLLs/{filename}.ldll", 'rb') as dll:
+            with open(f"{os.path.dirname(unipacker.__file__)}/DLLs/{filename}.ldll", 'rb') as dll:
                 loaded_dll = dll.read()
                 self.uc.mem_map(start_addr, align((len(loaded_dll) + 0x1000)))
                 self.uc.mem_write(start_addr, loaded_dll)
@@ -412,9 +412,9 @@ class UnpackerEngine(object):
         self.setup_processinfo()
 
         # Load DLLs
-        self.load_dll("DLLs/KernelBase.dll", 0x73D00000)
-        self.load_dll("DLLs/kernel32.dll", 0x755D0000)
-        self.load_dll("DLLs/ntdll.dll", 0x77400000)
+        self.load_dll(f"{os.path.dirname(unipacker.__file__)}/DLLs/KernelBase.dll", 0x73D00000)
+        self.load_dll(f"{os.path.dirname(unipacker.__file__)}/DLLs/kernel32.dll", 0x755D0000)
+        self.load_dll(f"{os.path.dirname(unipacker.__file__)}/DLLs/ntdll.dll", 0x77400000)
 
         # initialize machine registers
         self.uc.mem_map(self.STACK_ADDR, self.STACK_SIZE)
@@ -507,6 +507,6 @@ class UnpackerEngine(object):
 
 
 if __name__ == '__main__':
-    from shell import Shell
+    from unipacker.shell import Shell
 
     Shell()
