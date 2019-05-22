@@ -7,11 +7,13 @@
                   \_\     /_/ | |
                               |_|
 
-# Un{i}packer
+# Un{i}packer   [![PyPI: unipacker](https://badge.fury.io/py/unipacker.svg)](https://pypi.org/project/unipacker/)
+
 | | |
 |---|---|
 | Master  | [![Build Status](https://travis-ci.org/unipacker/unipacker.svg?branch=master)](https://travis-ci.org/unipacker/unipacker) |
 | Dev  | [![Build Status](https://travis-ci.org/unipacker/unipacker.svg?branch=dev)](https://travis-ci.org/unipacker/unipacker) |
+
 ## Unpacking PE files using Unicorn Engine
 
 The usage of runtime packers by malware authors is very common, as it is a technique that helps to hinder analysis.
