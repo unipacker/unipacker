@@ -32,5 +32,8 @@ setup(
         'console_scripts': [
             'unipacker=unipacker.shell:main'
         ]
+    },
+    package_data={
+        'unipacker': ['*', 'DLLs/*']
     }
 )
