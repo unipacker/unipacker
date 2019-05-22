@@ -7,19 +7,25 @@ matrix:
     - name: "Python 3.7.1 on Xenial Linux"
       python: 3.7           # this works for Linux but is ignored on macOS or Windows
       dist: xenial          # required for Python >= 3.7
+      cache: pip
+      install:
+        - pip install --upgrade pip setuptools pytest
+        - pip install -r requirements.txt
     - name: "Python 3.7.2 on macOS"
       os: osx
       osx_image: xcode10.2  # Python 3.7.2 running on macOS 10.14.3
       language: shell       # 'language: python' is an error on Travis CI macOS
+      install:
+        - pip3 install --upgrade pip setuptools pytest
+        - pip3 install -r requirements.txt
     - name: "Python 3.7.3 on Windows"
       os: windows           # Windows 10.0.17134 N/A Build 17134
       language: shell       # 'language: python' is an error on Travis CI Windows
       before_install: choco install python
       env: PATH=/c/Python37:/c/Python37/Scripts:$PATH
-
-install:
-  - pip3 install --upgrade pip setuptools pytest
-  - pip3 install -r requirements.txt
+      install:
+        - pip3 install --user --upgrade pip setuptools pytest
+        - pip3 install --user -r requirements.txt
 
 script:
   - python3 -m pytest -s
