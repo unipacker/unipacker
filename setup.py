@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-__VERSION__ = "0.0.2"
+__VERSION__ = "0.0.1"
 __NAME__ = 'unipacker'
 
 with open('README.md') as readme_file:
@@ -16,7 +16,6 @@ setup(
     long_description=README,
     license='GPL-2.0',
     url='https://github.com/unipacker/unipacker',
-    download_url='git+https://github.com/unipacker/unipacker.git',
     packages=find_packages(),
     include_package_data=True,
     install_requires=[
