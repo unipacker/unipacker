@@ -1,43 +1,45 @@
 sudo: required
-
 language: python
+
+env:
+  - TWINE_USERNAME=Masrepus
+  - secure: Zbf4Qtfqand/0DRDJH8CCODV632GMdlrJcqKW5qLKGSHyfSFgf1hNDPw+WmqfcaSt971i6eoIyushxyYfZyveS7koE5vmdl/lQVTOC+l+mrwN2qM8w+kmrHb09twRHJ2YfXZ6ValF95o9HJj3/mAhH7pKrYNjYy6B3T506VCAU35kp9RxRS6F+Xy/Fg07bk7092iY8Hpk8jnP8ipcvylr3tYjEB9vhoQU4sJbZNkOGOdfd6QjOEToeX5LLHe5SA6fAzaDOPmK24iiaEcEGNG30xwVCTNYMoh9c4z+hJOdpoiK/imuzrQkHwBKTVLA2ZCm2HS3S0IWQtVxsxYJIHTZgW2rPT0WWd+6Zfx9t7yaUix4Uo2AWfI323FZMoVcseXp2mdd+btHaMPQYsULyc6sbKBLmncSFZLQZZgzj/EN8zcHLauPBWbvI0Nv5yMd2spyqF5KpPR93No2Ya20Agn9RVCdDCQ490zlrL85+MH1FHI6BM6TcVKweHNmIJEgvsruk4JCWgXCkzxHWx22HEn/gf8C8HtSIG7SLBBOepPjBWattyCow7q+PffDUw9WDrUCl5U5ei7AAEhX3UhL4VAr/UMq8kgJB7jRxKMPutJp9rhyzjNc3DXKLtcFUzwfu3OFZBCZfnWav3JQlQ7cK+IfvSB6p4ypNLww2osUJ1INNA=
 
 matrix:
   include:
-    - name: "Python 3.7.1 on Xenial Linux"
-      python: 3.7           # this works for Linux but is ignored on macOS or Windows
-      dist: xenial          # required for Python >= 3.7
-      cache: pip
-      install:
-        - pip install --upgrade pip setuptools pytest
-        - pip install -r requirements.txt
-    - name: "Python 3.7.2 on macOS"
-      os: osx
-      osx_image: xcode10.2  # Python 3.7.2 running on macOS 10.14.3
-      language: shell       # 'language: python' is an error on Travis CI macOS
-      install:
-        - pip3 install --upgrade pip setuptools pytest
-        - pip3 install -r requirements.txt
-    - name: "Python 3.7.3 on Windows"
-      os: windows           # Windows 10.0.17134 N/A Build 17134
-      language: shell       # 'language: python' is an error on Travis CI Windows
-      before_install: choco install python
-      env: PATH=/c/Python37:/c/Python37/Scripts:$PATH
-      install:
-        - pip3 install --user --upgrade pip setuptools pytest
-        - pip3 install --user -r requirements.txt
+  - name: "Python 3.7.1 on Xenial Linux"
+    python: 3.7           # this works for Linux but is ignored on macOS or Windows
+    dist: xenial          # required for Python >= 3.7
+    cache: pip
+    install:
+        - pip install --upgrade pip setuptools pytest wheel twine
+        - pip install -e .
+    env: DISTS='sdist bdist_wheel'
+  - name: Python 3.7.2 on macOS
+    os: osx
+    osx_image: xcode10.2  # Python 3.7.2 running on macOS 10.14.3
+    language: shell       # 'language: python' is an error on Travis CI macOS
+    install:
+        - pip3 install --upgrade pip setuptools pytest wheel twine
+        - pip3 install -e .
+    env: DISTS='bdist_wheel'
+  - name: Python 3.7.3 on Windows
+    os: windows           # Windows 10.0.17134 N/A Build 17134
+    language: shell       # 'language: python' is an error on Travis CI Windows
+    before_install: choco install python
+    env: PATH=/c/Python37:/c/Python37/Scripts:$PATH DISTS='bdist_wheel'
+    install:
+        - pip3 install --user --upgrade pip setuptools pytest wheel twine
+        - pip3 install --user -e .
   allow_failures:
-    - os: windows
+  - os: windows
 
 script:
-  - python3 -m pytest -s
+- python3 -m pytest -s
 
 deploy:
-  provider: pypi
-  user: Masrepus
-  password:
-    secure: jmlsP5GjRg92yVmsjcnqizqu5G56aeey2jF6bD32/RU5sIligjNNobYbDGPPH4UWyZ73/D2aa81FwAtXxR76On367QhIxK4pQUyyAPuhaF7/IRxN1LA9rXg98r+43QkuphdDPLP3hI3n4TxXMV2cfJcDmyeb5HA0BRtjeTAa5clLw3fJ8/MKzo9EHdzy2JNo2ACR23Fzd8E4hqcTvasl4rn8bqOcw7O6/gVNvCV2xx9lEMScyGQk22zqFDMEXDk4usDISO6ZGz/BUrBLL5PxBS1RXlE0Phj+QedMUSg0rIivuz2Zep/uDx6rUkg2HWj7Ou6M/vthIYB6qyrBMhTgOctODQ0WaH8Q1gO7WwX8eWxhswRCYm0FPCU8C7FhjuKJyiOqsBxitQKn+m2fiyc5yUBC9wsVr3JbjxLNyFeVv8K7o5kU7Pr4GcM0VyjUcZwDIP51ZLFtkDv50HoU8wGo5JrgtxjYmroLIJFmSmsI9uZiBfQgomwd+eAWe+bf7fWH4+RAz/qXY6g4wEk7szw7kTCXC15bjdSYwZRFCWQwZF1rmTUapmYCzeH0QQUO6LBnfWDfb+IUSmdiXNGf458uNUdhl0maPpb0qkRjGBNvxElPy1IdbcZRP1RPe7cFJ1UXiuYhY6hF5cIY/GOKR9woQzavKTUw4gaAUX2jOC9DzHA=
-  distributions: sdist bdist_wheel
+  provider: script
+  script: bash deploy.sh
   on:
-    tags: true
     all_branches: true
+    tags: true
