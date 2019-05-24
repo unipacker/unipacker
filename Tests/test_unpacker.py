@@ -4,8 +4,6 @@ import sys
 import threading
 from unittest import TestCase
 
-import pytest
-
 from unipacker.core import UnpackerEngine, UnpackerClient, Sample
 from unipacker.unpackers import get_unpacker
 
@@ -97,28 +95,24 @@ class EngineTest(TestCase):
         print(f"\n--- Done, checking for success ---")
         return hashes
 
-    @pytest.mark.skip()
     def test_aspack(self):
         hash_list = self.perform_test("ASPack/", [])
         for name, old_md5, new_md5 in hash_list:
             self.assertTrue(new_md5 == old_md5, f"Expected: {old_md5}, got {new_md5}")
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
 
-    @pytest.mark.skip()
     def test_fsg(self):
         hash_list = self.perform_test("FSG/", ["Lab18-02.exe"])
         for name, old_md5, new_md5 in hash_list:
             self.assertTrue(new_md5 == old_md5, f"Expected: {old_md5}, got {new_md5}")
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
 
-    @pytest.mark.skip()
     def test_mew(self):
         hash_list = self.perform_test("MEW/", [])
         for name, old_md5, new_md5 in hash_list:
             self.assertTrue(new_md5 == old_md5, f"Expected: {old_md5}, got {new_md5}")
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
 
-    @pytest.mark.skip()
     def test_mpress(self):
         hash_list = self.perform_test("MPRESS/", [])
         for name, old_md5, new_md5 in hash_list:
@@ -131,7 +125,6 @@ class EngineTest(TestCase):
             self.assertTrue(new_md5 == old_md5, f"Expected: {old_md5}, got {new_md5}")
             print(f"{name}:\n\told_md5: {old_md5}\n\tnew_md5: {new_md5}")
 
-    @pytest.mark.skip()
     def test_yzpack(self):
         hash_list = self.perform_test("YZPack/", ["YZpack2.0Unpackme.exe"])
         for name, old_md5, new_md5 in hash_list:
