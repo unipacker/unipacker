@@ -180,7 +180,6 @@ class WinApiCalls(object):
         self.sample.allocated_chunks = list(merge(self.sample.allocated_chunks + [(aligned_address, aligned_address + aligned_size)]))
         log and self.print_allocs()
         self.alloc_sizes[aligned_address] = aligned_size
-        self.sample.allocated_chunks.append((aligned_address, aligned_size))
         return aligned_address
 
     # TODO remove from allocated_chunks in Sample object when VirtualFree is called
