@@ -368,7 +368,7 @@ data at the right offsets.
 Stack space and memory not belonging to the image address space is not dumped."""
         try:
             args = args or "unpacked.exe"
-            self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler, path=args)
+            self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler, self.sample, path=args)
         except OSError as e:
             print(f"Error dumping to {args}: {e}")
 
@@ -656,7 +656,7 @@ details on this representation)"""
                     print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
         else:
             self.rules = yara.compile(filepath=args)
-        self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler)
+        self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler, self.sample)
         matches = self.rules.match("unpacked.exe")
         print(", ".join(map(str, matches)))
 

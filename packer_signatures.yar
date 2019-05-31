@@ -84,8 +84,9 @@ rule petite{
         date = "2019-01-16"
     strings:
         $petite = ".petite"
+        $petite2 = "petite"
     condition:
-        pe32 and $petite
+        pe32 and ($petite or $petite2)
 }
 
 rule mew{

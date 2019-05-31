@@ -15,6 +15,7 @@ header_sizes = {
     "_IMAGE_OPTIONAL_HEADER": len(bytes(_IMAGE_OPTIONAL_HEADER())),  # 0xE0
     "IMAGE_SECTION_HEADER": len(bytes(IMAGE_SECTION_HEADER())),  # 0x28
     "_IMAGE_DATA_DIRECTORY": len(bytes(_IMAGE_DATA_DIRECTORY())),  # 0x8
+    "IMAGE_IMPORT_DESCRIPTOR": len(bytes(IMAGE_IMPORT_DESCRIPTOR())),
 }
 
 short_hdr_names = {
@@ -63,6 +64,7 @@ datadirectory_entry_to_pos = {"IMAGE_DIRECTORY_ENTRY_EXPORT": 0, "IMAGE_DIRECTOR
 
 
 def parse_disk_to_header(sample, query_header=None):
+    offsets = {}
     # Read DOS Header
     with open(sample, 'rb') as f:
         dos_read = bytearray(f.read(header_sizes["_IMAGE_DOS_HEADER"]))
@@ -81,9 +83,12 @@ def parse_disk_to_header(sample, query_header=None):
         if query_header == "_IMAGE_DOS_HEADER":
             return dos_header
 
+        offsets["_IMAGE_DOS_HEADER"] = 0
+
         # Read PE Header
         pe_hdr_offset = e_lfanew
         f.seek(pe_hdr_offset)
+        offsets["_IMAGE_FILE_HEADER"] = pe_hdr_offset
         pe_read = bytearray(f.read(header_sizes["_IMAGE_FILE_HEADER"]))
         pe_header = _IMAGE_FILE_HEADER.from_buffer(pe_read)
 
@@ -103,6 +108,7 @@ def parse_disk_to_header(sample, query_header=None):
         # Read Optional Header
         opt_hdr_offset = pe_hdr_offset + header_sizes["_IMAGE_FILE_HEADER"]
         f.seek(opt_hdr_offset)
+        offsets["_IMAGE_OPTIONAL_HEADER"] = opt_hdr_offset
         opt_read = bytearray(f.read(header_sizes["_IMAGE_OPTIONAL_HEADER"]))
         opt_header = _IMAGE_OPTIONAL_HEADER.from_buffer(opt_read)
 
@@ -119,14 +125,24 @@ def parse_disk_to_header(sample, query_header=None):
 
         rva_to_IMAGE_IMPORT_DESCRIPTOR = getattr(getattr(opt_header, "DataDirectory")[1], "VirtualAddress")
         size_import_table = getattr(getattr(opt_header, "DataDirectory")[1], "Size")
-        # import_table = get_imp(uc, rva_to_IMAGE_IMPORT_DESCRIPTOR, base_addr, size_import_table)
-        import_table = []
-        # TODO remove uc imp table
+        #import_table = get_imp(uc, rva_to_IMAGE_IMPORT_DESCRIPTOR, base_addr, size_import_table)
+        import_descriptor_table = []
+        # TODO Use this when custom loader finished
+        #for x in range(int((size_import_table / header_sizes["IMAGE_IMPORT_DESCRIPTOR"]))):
+        #    f.seek(rva_to_IMAGE_IMPORT_DESCRIPTOR)
+        #    imp_descriptor_read = bytearray(f.read(header_sizes["IMAGE_IMPORT_DESCRIPTOR"]))
+        #    imp_descriptor = IMAGE_IMPORT_DESCRIPTOR.from_buffer(imp_descriptor_read)
+        #    if getattr(imp_descriptor, "Characteristics") != 0 or getattr(imp_descriptor, "FirstThunk") != 0:
+        #        import_descriptor_table.append(imp_descriptor)
+        #        rva_to_IMAGE_IMPORT_DESCRIPTOR += header_sizes["IMAGE_IMPORT_DESCRIPTOR"]
+        #    else:
+        #        break
         if query_header == "IMPORTS":
-            return import_table
+            return import_descriptor_table
 
         # Read Section Header
         section_hdr_offset = opt_hdr_offset + header_sizes["_IMAGE_OPTIONAL_HEADER"]
+        offsets["IMAGE_SECTION_HEADER"] = section_hdr_offset
         section_headers = []
         for i in range(number_of_sections):
             f.seek(section_hdr_offset)
@@ -138,9 +154,12 @@ def parse_disk_to_header(sample, query_header=None):
         if query_header == "IMAGE_SECTION_HEADER":
             return section_headers
 
+        if query_header == "Offsets":
+            return offsets
+
         headers = {"_IMAGE_DOS_HEADER": dos_header, "_IMAGE_FILE_HEADER": pe_header,
                    "_IMAGE_OPTIONAL_HEADER": opt_header,
-                   "IMAGE_SECTION_HEADER": section_headers, "IMPORTS": import_table, }
+                   "IMAGE_SECTION_HEADER": section_headers, "IMPORTS": import_descriptor_table, }
 
         return headers
 

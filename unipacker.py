@@ -7,34 +7,46 @@ from time import time
 import pefile
 from unicorn import *
 from unicorn.x86_const import *
-
+import collections
 from apicalls import WinApiCalls
-from headers import PE, get_disk_headers, conv_to_class_header
+from headers import PE, get_disk_headers, conv_to_class_header, parse_disk_to_header
 from kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
-from pe_structs import SectionHeader, IMAGE_SECTION_HEADER
+from pe_structs import SectionHeader, IMAGE_SECTION_HEADER, ImportDescriptor, Import
 from unpackers import get_unpacker
-from utils import merge, align, convert_to_string, InvalidPEFile
+from utils import merge, align, convert_to_string, InvalidPEFile, fix_section_names
 
 
 class Sample(object):
 
     def __init__(self, path, auto_default_unpacker=True):
         self.path = path
+        self.init_headers()
+        self.imports = set()
+        self.dllname_to_functionlist = collections.OrderedDict()  # dll_name -> [(name/ordinal, addr), ...]
+        self.original_imports = []
+        # setup section dict used for custom memory protection
+        self.atn = {}  # Dict Address to Name: (StartVAddr, EndVAddr) -> Name
+        self.ntp = {}  # Dict Name to Protection Tupel: Name -> (Execute, Read, Write)
+        self.allocated_chunks = []
+        self.offsets = parse_disk_to_header(path, "Offsets")
+
+        sec_ctr = 0
+        for s in self.sections:
+            if s.Name == "":
+                s.Name = "sect_" + str(sec_ctr)
+                sec_ctr += 1
+                fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
+
+        self.init_headers()
+
+        self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
+
+    def init_headers(self):
         self.headers = get_disk_headers(self)
         self.dos_header = conv_to_class_header(self.headers["_IMAGE_DOS_HEADER"])
         self.pe_header = conv_to_class_header(self.headers["_IMAGE_FILE_HEADER"])
         self.opt_header = conv_to_class_header(self.headers["_IMAGE_OPTIONAL_HEADER"])
         self.sections = conv_to_class_header(self.headers["IMAGE_SECTION_HEADER"])
-        self.imports = set()
-
-        sec_ctr = 0
-        # TODO write new section names into .exe
-        for s in self.sections:
-            if s.Name == "":
-                s.Name = "sect_" + str(sec_ctr)
-                sec_ctr += 1
-
-        self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
 
     def __str__(self):
         return f"Sample: [{self.yara_matches[-1]}] {self.path}"
@@ -168,14 +180,14 @@ class UnpackerEngine(object):
             self.pause()
         if address == self.sample.unpacker.endaddr:
             print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
-            self.sample.unpacker.dump(uc, self.apicall_handler)
+            self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
             self.pause()
 
         if self.sample.unpacker.write_execute_control and address not in self.apicall_handler.hooks and (
                 address < self.HOOK_ADDR or address > self.HOOK_ADDR + 0x1000):
             if any(lower <= address <= upper for (lower, upper) in sorted(self.write_targets)):
                 print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
-                self.sample.unpacker.dump(uc, self.apicall_handler)
+                self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
                 self.pause()
 
         if self.sample.unpacker.section_hopping_control and address not in self.apicall_handler.hooks and address - 0x7 not in self.apicall_handler.hooks and (
@@ -184,7 +196,7 @@ class UnpackerEngine(object):
                 sec_name = self.sample.unpacker.get_section(address)
                 print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
                 self.sample.unpacker.allow(address)
-                self.sample.unpacker.dump(uc, self.apicall_handler)
+                self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
                 self.pause()
 
         curr_section = self.sample.unpacker.get_section(address)
@@ -408,24 +420,23 @@ class UnpackerEngine(object):
         self.uc.mem_map(self.STACK_ADDR, self.STACK_SIZE)
         self.uc.reg_write(UC_X86_REG_ESP, self.STACK_ADDR + int(self.STACK_SIZE / 2))
         self.uc.reg_write(UC_X86_REG_EBP, self.STACK_ADDR + int(self.STACK_SIZE / 2))
-        self.uc.mem_write(self.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1]))
+        self.uc.mem_write(self.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1])) #-> PEtite Stack Operations?
+        self.uc.reg_write(UC_X86_REG_EAX, self.sample.unpacker.startaddr)
+        self.uc.reg_write(UC_X86_REG_EBX, self.PEB_BASE)
         self.uc.reg_write(UC_X86_REG_ECX, self.sample.unpacker.startaddr)
         self.uc.reg_write(UC_X86_REG_EDX, self.sample.unpacker.startaddr)
         self.uc.reg_write(UC_X86_REG_ESI, self.sample.unpacker.startaddr)
         self.uc.reg_write(UC_X86_REG_EDI, self.sample.unpacker.startaddr)
-
-        # setup section dict used for custom memory protection
-        atn = {}  # Dict Address to Name: (StartVAddr, EndVAddr) -> Name
-        ntp = {}  # Dict Name to Protection Tupel: Name -> (Execute, Read, Write)
+        self.uc.reg_write(UC_X86_REG_EFLAGS, 0x244)
 
         new_pe = PE(self.uc, self.sample.BASE_ADDR)
         prot_val = lambda x, y: True if x & y != 0 else False
         for s in new_pe.section_list:
-            atn[(
+            self.sample.atn[(
                 s.VirtualAddress + self.sample.BASE_ADDR,
                 s.VirtualAddress + self.sample.BASE_ADDR + s.VirtualSize)] = convert_to_string(
                 s.Name)
-            ntp[convert_to_string(s.Name)] = (
+            self.sample.ntp[convert_to_string(s.Name)] = (
                 prot_val(s.Characteristics, 0x20000000), prot_val(s.Characteristics, 0x40000000),
                 prot_val(s.Characteristics, 0x80000000))
 
@@ -434,9 +445,7 @@ class UnpackerEngine(object):
         #    ntp[s.Name] = (s.IMAGE_SCN_MEM_EXECUTE, s.IMAGE_SCN_MEM_READ, s.IMAGE_SCN_MEM_WRITE)
 
         # init syscall handling and prepare hook memory for return values
-        self.apicall_handler = WinApiCalls(self.sample.BASE_ADDR, self.sample.virtualmemorysize,
-                                                 self.HOOK_ADDR, self.breakpoints,
-                                                 self.sample.path, atn, ntp)
+        self.apicall_handler = WinApiCalls(self)
         self.uc.mem_map(self.HOOK_ADDR, 0x1000)
         #self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.HOOK_ADDR, "vsize": 0x1000}]
         hook_sec_header = IMAGE_SECTION_HEADER(
@@ -459,7 +468,14 @@ class UnpackerEngine(object):
         self.uc.mem_write(self.HOOK_ADDR, hexstr)
 
         # handle imports
+        # TODO Update when custom loader available
         for lib in pe.DIRECTORY_ENTRY_IMPORT:
+            descriptor = ImportDescriptor(None, lib.struct.Characteristics, lib.struct.TimeDateStamp, lib.struct.ForwarderChain, lib.struct.Name, lib.struct.FirstThunk)
+            fct_list = []
+            for i in lib.imports:
+                fct_list.append(i.name)
+            imp = Import(descriptor, lib.dll.decode('ascii'), fct_list)
+            self.sample.original_imports.append(imp)
             for func in lib.imports:
                 func_name = func.name.decode() if func.name is not None else f"no name: 0x{func.address:02x}"
                 dll_name = lib.dll.decode() if lib.dll is not None else "-- unknown --"
@@ -469,15 +485,6 @@ class UnpackerEngine(object):
 
         hdr = PE(self.uc, self.sample.BASE_ADDR)
 
-        # TODO below new version but needs testing as it is crashing
-        # import_table = get_imp(self.uc, hdr.data_directories[1].VirtualAddress, self.sample.BASE_ADDR, hdr.data_directories[1].Size, True)
-        # for lib in import_table:
-        #    for func_name, func_addr in lib.imports:
-        #        func_name = func_name if func_name is not None else f"no name: 0x{func_addr:02x}"
-        #        dll_name = lib.Name if lib.Name is not None else "-- unknown --"
-        #        self.sample.imports.add(func_name)
-        #        curr_hook_addr = self.apicall_handler.add_hook(self.uc, func_name, dll_name)
-        #        self.uc.mem_write(func_addr, struct.pack('<I', curr_hook_addr))
 
         # Patch DLLs with hook
         # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll

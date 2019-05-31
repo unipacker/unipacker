@@ -8,7 +8,7 @@ from unicorn.x86_const import *
 from headers import PE, pe_write
 from pe_structs import _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, \
     IMAGE_SECTION_HEADER, IMAGE_IMPORT_DESCRIPTOR
-from utils import alignments, InvalidPEFile, convert_to_string, print_addr_list
+from utils import alignments, InvalidPEFile, convert_to_string, print_addr_list, print_chunks
 
 
 class ImageDump(object):
@@ -261,8 +261,64 @@ class ImageDump(object):
         hdr.sync(uc)
         return hdr
 
+    def append_original_imports(self, uc, hdr, original_imp):
+        rva_to_imp_table = hdr.data_directories[1].VirtualAddress
+        size_of_imp_table = hdr.data_directories[1].Size
+        base_addr = hdr.opt_header.ImageBase
+
+        new_size = size_of_imp_table + len(original_imp) * len(bytes(IMAGE_IMPORT_DESCRIPTOR()))
+
+        rva_end = rva_to_imp_table + size_of_imp_table
+        total_new_offset = rva_end + new_size + 0x100
+
+        fct_name_offset = total_new_offset
+
+        for imp_desc in original_imp:
+            image_import_by_name_offsets = []
+
+            for imp in imp_desc.imports:
+                fct_name = b'\x00\x00' + imp + b'\x00'
+                uc.mem_write(fct_name_offset + base_addr, fct_name)
+                image_import_by_name_offsets.append(fct_name_offset)
+                fct_name_offset += len(fct_name)
+
+            fct_name_offset += 0x50
+            imp_desc.Import_Descriptor.Characteristics = fct_name_offset
+
+            iat_offset = 0 + imp_desc.Import_Descriptor.FirstThunk
+
+            for addr in image_import_by_name_offsets:
+                uc.mem_write(fct_name_offset + base_addr, struct.pack("<I", addr))
+
+                uc.mem_write(iat_offset + base_addr, struct.pack("<I", addr))
+
+                fct_name_offset += 4
+                iat_offset += 4
+
+            fct_name_offset += 0x10
+
+            imp_desc.Import_Descriptor.Name = fct_name_offset
+            new_name = imp_desc.name.encode('ascii') + b'\x00'
+            uc.mem_write(fct_name_offset + base_addr, new_name)
+
+            fct_name_offset += 0x20
+            image_import_descriptor = IMAGE_IMPORT_DESCRIPTOR(
+                imp_desc.Import_Descriptor.Characteristics,
+                imp_desc.Import_Descriptor.TimeDateStamp,
+                imp_desc.Import_Descriptor.ForwarderChain,
+                imp_desc.Import_Descriptor.Name,
+                imp_desc.Import_Descriptor.FirstThunk,
+            )
+            uc.mem_write(rva_end + base_addr, bytes(image_import_descriptor))
+            rva_end += len(bytes(image_import_descriptor))
+
+        hdr.data_directories[1].Size = new_size
+        hdr.sync(uc)
+        return hdr
+
+
     # TODO Dummy
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imports):
         # pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
         # with open(".unipacker_brokenimport.exe", 'rb') as f:
         #    b = f.read()
@@ -371,17 +427,19 @@ class ImageDump(object):
         hdr.opt_header.CheckSum = pe.generate_checksum()
         return hdr
 
-    def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, path="unpacked.exe"):
+    def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, sample, path="unpacked.exe"):
         ntp = apicall_handler.ntp
-        dllname_to_functionlist = apicall_handler.dllname_to_functionlist
-        if len(apicall_handler.allocated_chunks) == 0:
+        dllname_to_functionlist = sample.dllname_to_functionlist
+        if len(sample.allocated_chunks) == 0:
             total_size = virtualmemorysize
         else:
-            total_size = sorted(apicall_handler.allocated_chunks)[-1][1] - base_addr
+            total_size = sorted(sample.allocated_chunks)[-1][1] - base_addr
+            virtualmemorysize = total_size
 
         print(f"Totalsize:{hex(total_size)}, "
-              f"VirtualMemorySize:{hex(virtualmemorysize)}, "
-              f"Allocated chunks: {apicall_handler.allocated_chunks}")
+              f"VirtualMemorySize:{hex(virtualmemorysize)}")
+
+        print_chunks(sample.allocated_chunks)
 
         try:
             hdr = PE(uc, base_addr)
@@ -396,7 +454,7 @@ class ImageDump(object):
         hdr.opt_header.AddressOfEntryPoint = uc.reg_read(UC_X86_REG_EIP) - base_addr
 
         print("Fixing Imports...")
-        hdr = self.fix_imports(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+        hdr = self.fix_imports(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, sample.original_imports)
 
         print("Fixing sections")
         self.fix_sections(hdr, old_number_of_sections, virtualmemorysize)
@@ -408,17 +466,17 @@ class ImageDump(object):
         print(f"RVA to import table: {hex(hdr.data_directories[1].VirtualAddress)}")
 
         if (virtualmemorysize - 0xE000) <= hdr.data_directories[1].VirtualAddress <= virtualmemorysize or len(
-                apicall_handler.allocated_chunks) != 0 or True:
+                sample.allocated_chunks) != 0 or True:
             print(f"Totalsize:{hex(total_size)}, "
                   f"VirtualMemorySize:{hex(virtualmemorysize)}, "
-                  f"Allocated chunks: {apicall_handler.allocated_chunks}")
+                  f"Allocated chunks: {sample.allocated_chunks}")
             # print("Relocating Headers to End of Image")
             # hdr.dos_header.e_lfanew = virtualmemorysize - 0x10000
             # hdr = self.add_section(hdr, '.newhdr', 0x10000, virtualmemorysize-0x10000)
             # print("Adding new import section")
             # hdr = self.add_section(hdr, '.nimdata', 0xe000, (virtualmemorysize - 0x10000) + 0x2000)
             # print("Appending allocated chunks at the end of the image")
-            # hdr = self.chunk_to_image_section_hdr(hdr, base_addr, apicall_handler.allocated_chunks)
+            # hdr = self.chunk_to_image_section_hdr(hdr, base_addr, sample.allocated_chunks)
             # TODO Fix chunk unmapped space with 0
         else:
             virtualmemorysize -= 0x10000
@@ -448,23 +506,35 @@ class ImageDump(object):
 
 # YZPackDump can use fix_imports_by_rebuilding as well
 class YZPackDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
         return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
         # return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
 class ASPackDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
 class FSGDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
+        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
+
+class PEtiteDump(ImageDump):
+    def fix_section_mem_protections(self, hdr, ntp):
+        for s in ntp.keys():
+            ntp[s] = (True, True, True)
+        return super().fix_section_mem_protections(hdr, ntp)
+
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
+        print(dllname_to_functionlist)
+        #return super().append_original_imports(uc, super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist), original_imp)
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
 class MEWDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
     def fix_section_mem_protections(self, hdr, ntp):
@@ -473,9 +543,10 @@ class MEWDump(ImageDump):
         return super().fix_section_mem_protections(hdr, ntp)
 
 class MPRESSDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 class UPXDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
+        print(dllname_to_functionlist)
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)

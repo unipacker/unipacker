@@ -2,7 +2,7 @@ import sys
 
 import yara
 
-from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump
+from imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump, PEtiteDump
 from utils import InvalidPEFile
 
 
@@ -51,8 +51,8 @@ class DefaultUnpacker(object):
                 print("Incorrect start address!")
         return startaddr
 
-    def dump(self, uc, apicall_handler, path="unpacked.exe"):
-        self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, apicall_handler, path)
+    def dump(self, uc, apicall_handler, sample, path="unpacked.exe"):
+        self.dumper.dump_image(uc, self.BASE_ADDR, self.virtualmemorysize, apicall_handler, sample, path)
 
     def is_allowed(self, address):
         for start, end in self.allowed_addr_ranges:
@@ -65,6 +65,7 @@ class DefaultUnpacker(object):
         curr_section_range = self.get_section_range(sec_name)
         if curr_section_range:
             self.allowed_sections += [sec_name]
+            self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
     def get_allowed_addr_ranges(self):
         allowed_ranges = []
@@ -117,9 +118,24 @@ class UPXUnpacker(AutomaticDefaultUnpacker):
 
 class PEtiteUnpacker(AutomaticDefaultUnpacker):
 
-    # TODO Petite section hopping not working
+    def __init__(self, sample):
+        super().__init__(sample)
+        ep = sample.opt_header.AddressOfEntryPoint
+        for s in self.secs:
+            start_addr = s.VirtualAddress
+            end_addr = s.VirtualSize + start_addr
+            if start_addr <= ep <= end_addr:
+                finish = end_addr
+
+        self.allowed_addr_ranges = [(ep + self.BASE_ADDR, finish + self.BASE_ADDR)]
+        self.dumper = PEtiteDump()
+
     def is_allowed(self, address):
-        return True
+        for chunk in self.sample.allocated_chunks:
+            if chunk not in self.allowed_addr_ranges:
+                self.allowed_addr_ranges.append(chunk)
+        return super().is_allowed(address)
+
 
 
 class ASPackUnpacker(AutomaticDefaultUnpacker):

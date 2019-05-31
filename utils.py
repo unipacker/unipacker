@@ -123,6 +123,27 @@ def calc_threadid():
     return x
 
 
+def fix_section_names(path, offset, num_of_sections):
+    with open(path, 'rb+') as f:
+        c = 0
+        nc = 0
+        while c < num_of_sections:
+            f.seek(offset)
+            if f.read(1) == b'\x00':
+                f.seek(offset)
+                name = "sect_" + str(nc)
+                f.write(name.encode('ascii'))
+                nc += 1
+            c += 1
+            offset += 0x28
+
+
+def print_chunks(tupel_list):
+    print("Allocated Chunks:")
+    for e in tupel_list:
+        print(f"\t({hex(e[0])}, {hex(e[1])})")
+
+
 class ImportValues(object):
     def __init__(self, import_struct, name, imports):
         self.Characteristics = getattr(import_struct, "Characteristics")

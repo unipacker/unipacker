@@ -24,8 +24,8 @@ def api_call(*names):
             # let the API call see the original stack
             original_esp = esp + 4 * (num_args + 1)
             # pass the collected arguments to the API call and retrieve the return value
-            ret_value = func(self, uc, original_esp, log, *args)
             log and print(f"\tReturn address: 0x{ret_addr:02x}")
+            ret_value = func(self, uc, original_esp, log, *args)
 
             # re-place the return address on the stack (decrements esp by 4)
             uc.mem_write(original_esp - 4, struct.pack("<I", ret_addr))
@@ -42,27 +42,25 @@ def api_call(*names):
 
 
 class WinApiCalls(object):
-
-    def __init__(self, base_addr, virtualmemorysize, hook_addr, breakpoints, sample, atn, ntp):
-        self.base_addr = base_addr
-        self.virtualmemorysize = virtualmemorysize
-        self.hook_addr = hook_addr
+    # self, base_addr, virtualmemorysize, hook_addr, breakpoints, sample, atn, ntp
+    def __init__(self, engine):
+        self.base_addr = engine.sample.BASE_ADDR
+        self.virtualmemorysize = engine.sample.virtualmemorysize
+        self.hook_addr = engine.HOOK_ADDR
         self.next_hook_offset = 4
         self.hooks = {}
         self.module_handle_offset = 0
         self.module_handles = {}
         self.module_for_function = {}
         self.dynamic_mem_offset = self.base_addr + self.virtualmemorysize
-        self.allocated_chunks = []
         self.alloc_sizes = {}
         self.pending_breakpoints = set()
-        self.breakpoints = breakpoints
-        self.sample = sample
+        self.breakpoints = engine.breakpoints
+        self.sample = engine.sample
         self.heaps = {}
         self.next_heap_handle = self.hook_addr + 0x10000
-        self.atn = atn
-        self.ntp = ntp
-        self.dllname_to_functionlist = collections.OrderedDict()
+        self.atn = engine.sample.atn
+        self.ntp = engine.sample.ntp
         self.load_library_counter = {}  # DllName -> Number of Loads
         self.processid = calc_processid()
         self.threadid = calc_threadid()
@@ -113,7 +111,7 @@ class WinApiCalls(object):
         log and print(f"GetModuleHandleA: module_name_ptr 0x{module_name_ptr:02x}: {module_name}")
 
         if not module_name_ptr:
-            pe = pefile.PE(self.sample)
+            pe = pefile.PE(self.sample.path)
             loaded = pe.get_memory_mapped_image(ImageBase=self.base_addr)
             handle = self.alloc(log, len(loaded), uc)
             uc.mem_write(handle, loaded)
@@ -125,12 +123,12 @@ class WinApiCalls(object):
         if module_name not in self.load_library_counter:
             self.load_library_counter[module_name] = 0
             module_name += "#0"
-            self.dllname_to_functionlist[module_name] = []
+            self.sample.dllname_to_functionlist[module_name] = []
         else:
             self.load_library_counter[module_name] += 1
             counter = self.load_library_counter[module_name]
             module_name += "#" + str(counter)
-            self.dllname_to_functionlist[module_name] = []
+            self.sample.dllname_to_functionlist[module_name] = []
 
         return handle
 
@@ -152,7 +150,7 @@ class WinApiCalls(object):
         aligned_size = align(size, page_size)
         log and print(f"\tUnaligned size: 0x{size:02x}, aligned size: 0x{aligned_size:02x}")
         if offset is None:
-            for chunk_start, chunk_end in self.allocated_chunks:
+            for chunk_start, chunk_end in self.sample.allocated_chunks:
                 if chunk_start <= self.dynamic_mem_offset <= chunk_end:
                     # we have to push back the dynamic mem offset as it is inside an already allocated chunk!
                     self.dynamic_mem_offset = chunk_end + 1
@@ -165,7 +163,7 @@ class WinApiCalls(object):
 
         # check if we have mapped parts of it already
         mapped_partial = False
-        for chunk_start, chunk_end in self.allocated_chunks:
+        for chunk_start, chunk_end in self.sample.allocated_chunks:
             if chunk_start <= aligned_address < chunk_end:
                 if aligned_address + aligned_size <= chunk_end:
                     log and print(f"\tAlready fully mapped")
@@ -179,17 +177,19 @@ class WinApiCalls(object):
         if not mapped_partial:
             uc.mem_map(aligned_address, aligned_size)
         log and print(f"\tfrom 0x{aligned_address:02x} to 0x{(aligned_address + aligned_size):02x}")
-        self.allocated_chunks = list(merge(self.allocated_chunks + [(aligned_address, aligned_address + aligned_size)]))
+        self.sample.allocated_chunks = list(merge(self.sample.allocated_chunks + [(aligned_address, aligned_address + aligned_size)]))
         log and self.print_allocs()
         self.alloc_sizes[aligned_address] = aligned_size
+        self.sample.allocated_chunks.append((aligned_address, aligned_size))
         return aligned_address
 
+    # TODO remove from allocated_chunks in Sample object when VirtualFree is called
     @api_call()
     def VirtualFree(self, uc, esp, log, address, size, free_type):
         log and print(f"VirtualFree: chunk to free: 0x{address:02x}, size 0x{size:02x}, type 0x{free_type:02x}")
         new_chunks = []
         success = False
-        for start, end in sorted(self.allocated_chunks):
+        for start, end in sorted(self.sample.allocated_chunks):
             if start <= address <= end:
                 if free_type & 0x8000 and size == 0:  # MEM_RELEASE, clear whole allocated range
                     if address in self.alloc_sizes:
@@ -212,7 +212,7 @@ class WinApiCalls(object):
             else:
                 new_chunks += [(start, end)]
 
-        self.allocated_chunks = list(merge(new_chunks))
+        self.sample.allocated_chunks = list(merge(new_chunks))
         log and self.print_allocs()
         if success:
             return 1
@@ -264,10 +264,10 @@ class WinApiCalls(object):
             try:
                 counter = self.load_library_counter[module_name]
                 module_name += "#" + str(counter)
-                if module_name in self.dllname_to_functionlist:
-                    self.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
+                if module_name in self.sample.dllname_to_functionlist:
+                    self.sample.dllname_to_functionlist[module_name].append((proc_name, hook_addr))
                 else:
-                    self.dllname_to_functionlist[module_name] = [(proc_name, hook_addr)]
+                    self.sample.dllname_to_functionlist[module_name] = [(proc_name, hook_addr)]
             except KeyError:
                 print(f"Error: Accessing method of not registered Library")
 
@@ -285,12 +285,12 @@ class WinApiCalls(object):
         if mod_name not in self.load_library_counter:
             self.load_library_counter[mod_name] = 0
             mod_name += "#0"
-            self.dllname_to_functionlist[mod_name] = []
+            self.sample.dllname_to_functionlist[mod_name] = []
         else:
             self.load_library_counter[mod_name] += 1
             counter = self.load_library_counter[mod_name]
             mod_name += "#" + str(counter)
-            self.dllname_to_functionlist[mod_name] = []
+            self.sample.dllname_to_functionlist[mod_name] = []
 
         # print(f"LoadLibrary: {mod_name}")
         # print_dllname_to_functionlist(self.dllname_to_functionlist)
@@ -415,8 +415,11 @@ class WinApiCalls(object):
         self.pending_breakpoints.add(target)
 
     def print_allocs(self):
-        print("Currently allocated:")
-        lines = []
-        for start, end in self.allocated_chunks:
-            lines += [(hex(start), "-", hex(end))]
-        print_cols(lines)
+        if len(self.sample.allocated_chunks) == 0:
+            print("Currently there are no allocated chunks:")
+        else:
+            print("Currently allocated:")
+            lines = []
+            for start, end in self.sample.allocated_chunks:
+                lines += [(hex(start), "-", hex(end))]
+            print_cols(lines)

@@ -29,12 +29,28 @@ class IMAGE_IMPORT_DESCRIPTOR(Structure):
 
 
 class ImportDescriptor(object):
-    def __init__(self, image_import_descriptor):
-        self.Characteristics = getattr(image_import_descriptor, "Characteristics")
-        self.TimeDateStamp = getattr(image_import_descriptor, "TimeDataStamp")
-        self.ForwarderChain = getattr(image_import_descriptor, "ForwarderChain")
-        self.Name = getattr(image_import_descriptor, "Name")
-        self.FirstThunk = getattr(image_import_descriptor, "FirstThunk")
+    def __init__(self, image_import_descriptor, Characteristics=None, TimeDateStamp=None, ForwarderChain=None, Name=None, FirstThunk=None):
+        if image_import_descriptor is not None:
+            self.Characteristics = getattr(image_import_descriptor, "Characteristics")
+            self.TimeDateStamp = getattr(image_import_descriptor, "TimeDataStamp")
+            self.ForwarderChain = getattr(image_import_descriptor, "ForwarderChain")
+            self.Name = getattr(image_import_descriptor, "Name")
+            self.FirstThunk = getattr(image_import_descriptor, "FirstThunk")
+        else:
+            self.Characteristics = Characteristics
+            self.TimeDateStamp = TimeDateStamp
+            self.ForwarderChain = ForwarderChain
+            self.Name = Name
+            self.FirstThunk = FirstThunk
+
+
+class Import(object):
+    def __init__(self, Import_Descriptor, name=None, imports=[], ordinal=None):
+        self.ordinal = ordinal  # TODO Update ordinals
+        self.Import_Descriptor = Import_Descriptor
+        self.name = name
+        self.imports = imports
+
 
 
 # Array of IMAGE_SECTION_HEADERS is Section TABLE
