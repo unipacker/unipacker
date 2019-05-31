@@ -8,6 +8,7 @@ import pefile
 from unicorn import *
 from unicorn.x86_const import *
 import collections
+import unipacker
 from unipacker.apicalls import WinApiCalls
 from unipacker.headers import PE, get_disk_headers, conv_to_class_header, parse_disk_to_header
 from unipacker.kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
