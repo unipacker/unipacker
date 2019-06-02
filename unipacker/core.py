@@ -32,13 +32,16 @@ class Sample(object):
         self.offsets = parse_disk_to_header(path, "Offsets")
 
         sec_ctr = 0
+        sect_names = []
         for s in self.sections:
-            if s.Name == "":
+            if s.Name == "" or s.Name in sect_names:
                 s.Name = "sect_" + str(sec_ctr)
                 sec_ctr += 1
-                fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
+                #fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
+                # TODO Add to unpackers
+            sect_names.append(s.Name)
 
-        self.init_headers()
+        #self.init_headers()
 
         self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
 
@@ -216,6 +219,7 @@ class UnpackerEngine(object):
             else:
                 self.apicall_counter[api_call_name] += 1
             if ret is not None:  # might be a void function
+                #print("RET: " + str(ret) + " APICALL_NAME: " + api_call_name)
                 uc.mem_write(self.HOOK_ADDR, struct.pack("<I", ret))
             uc.reg_write(UC_X86_REG_ESP, esp)
         self.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
