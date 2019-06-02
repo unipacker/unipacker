@@ -36,7 +36,8 @@ class Sample(object):
             if s.Name == "":
                 s.Name = "sect_" + str(sec_ctr)
                 sec_ctr += 1
-                fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
+                #fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
+                # TODO Add to unpackers
 
         self.init_headers()
 
@@ -216,6 +217,7 @@ class UnpackerEngine(object):
             else:
                 self.apicall_counter[api_call_name] += 1
             if ret is not None:  # might be a void function
+                #print("RET: " + str(ret) + " APICALL_NAME: " + api_call_name)
                 uc.mem_write(self.HOOK_ADDR, struct.pack("<I", ret))
             uc.reg_write(UC_X86_REG_ESP, esp)
         self.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))

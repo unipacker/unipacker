@@ -115,7 +115,7 @@ class WinApiCalls(object):
             loaded = pe.get_memory_mapped_image(ImageBase=self.base_addr)
             handle = self.alloc(log, len(loaded), uc)
             uc.mem_write(handle, loaded)
-            return handle, esp + 4
+            return handle
         handle = self.base_addr + self.module_handle_offset
         self.module_handle_offset += 1
         self.module_handles[handle] = get_string(module_name_ptr, uc)

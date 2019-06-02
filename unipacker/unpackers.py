@@ -129,7 +129,9 @@ class PEtiteUnpacker(AutomaticDefaultUnpacker):
             if start_addr <= ep <= end_addr:
                 finish = end_addr
 
-        self.allowed_addr_ranges = [(ep + self.BASE_ADDR, finish + self.BASE_ADDR)]
+        #self.allowed_sections = ['.text']
+        #self.allowed_addr_ranges = self.get_allowed_addr_ranges()
+        self.allowed_addr_ranges.extend([(ep + self.BASE_ADDR, finish + self.BASE_ADDR)])
         self.dumper = PEtiteDump()
 
     def is_allowed(self, address):
