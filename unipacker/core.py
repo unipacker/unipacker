@@ -32,14 +32,16 @@ class Sample(object):
         self.offsets = parse_disk_to_header(path, "Offsets")
 
         sec_ctr = 0
+        sect_names = []
         for s in self.sections:
-            if s.Name == "":
+            if s.Name == "" or s.Name in sect_names:
                 s.Name = "sect_" + str(sec_ctr)
                 sec_ctr += 1
                 #fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
                 # TODO Add to unpackers
+            sect_names.append(s.Name)
 
-        self.init_headers()
+        #self.init_headers()
 
         self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
 
