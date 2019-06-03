@@ -46,7 +46,7 @@ press ```Enter```
 ### Normal installation
 Install the [YARA](https://github.com/VirusTotal/yara) package for your OS
 ```
-pip install unipacker
+pip3 install unipacker
 unipacker
 ```
 **Attention!** It is strongly advised to use the requirements.txt, as we use a custom version of unicorn-engine that differs
@@ -59,11 +59,7 @@ Additionally, all of the shell commands are documented. To access this informati
 You can also use the provided Dockerfile to run a containerized version of Un{i}packer:
 ```
 docker build -t unipacker . && \
-docker run \
--v ~/local_samples:/root/unipacker/local_samples \
---name unipacker \
---rm \
-unipacker 
+docker run -it -v ~/local_samples:/root/unipacker/local_samples unipacker
 ```
 Assuming you have a folder called ```local_samples``` in your home directory, this will be mounted inside the container.
 Un{i}packer will thus be able to access those binaries via ```/root/unipacker/local_samples```
