@@ -1,3 +1,4 @@
+import collections
 import os
 import struct
 import sys
@@ -7,14 +8,14 @@ from time import time
 import pefile
 from unicorn import *
 from unicorn.x86_const import *
-import collections
+
 import unipacker
 from unipacker.apicalls import WinApiCalls
 from unipacker.headers import PE, get_disk_headers, conv_to_class_header, parse_disk_to_header
 from unipacker.kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unipacker.pe_structs import SectionHeader, IMAGE_SECTION_HEADER, ImportDescriptor, Import
 from unipacker.unpackers import get_unpacker
-from unipacker.utils import merge, align, convert_to_string, InvalidPEFile, fix_section_names
+from unipacker.utils import merge, align, convert_to_string, InvalidPEFile
 
 
 class Sample(object):
@@ -37,11 +38,11 @@ class Sample(object):
             if s.Name == "" or s.Name in sect_names:
                 s.Name = "sect_" + str(sec_ctr)
                 sec_ctr += 1
-                #fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
+                # fix_section_names(path, self.offsets["IMAGE_SECTION_HEADER"], self.pe_header.NumberOfSections)
                 # TODO Add to unpackers
             sect_names.append(s.Name)
 
-        #self.init_headers()
+        # self.init_headers()
 
         self.unpacker, self.yara_matches = get_unpacker(self, auto_default_unpacker)
 
@@ -53,20 +54,22 @@ class Sample(object):
         self.sections = conv_to_class_header(self.headers["IMAGE_SECTION_HEADER"])
 
     def __str__(self):
-        return f"Sample: [{self.yara_matches[-1]}] {self.path}"
+        return f"Sample: [{self.unpacker.name}] {self.path}"
 
     @staticmethod
-    def get_samples(path):
+    def get_samples(path, interactive=True):
         if os.path.isdir(path):
-            response = input("Automatically find packer entry and exit points for unknown packers? [Y/n]: ")
+            response = None if not interactive else input(
+                "Automatically find packer entry and exit points for unknown packers? [Y/n]: ")
             auto_default_unpacker = not response or response.lower().startswith("y")
-            for file in os.listdir(path):
-                try:
-                    sample = Sample(os.path.join(path, file), auto_default_unpacker)
-                except InvalidPEFile as e:
-                    print(f"Could not initialize {file}: {e}")
-                    continue
-                yield sample
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    try:
+                        sample = Sample(os.path.join(root, file), auto_default_unpacker)
+                    except InvalidPEFile as e:
+                        print(f"Could not initialize {file}: {e}")
+                        continue
+                    yield sample
         else:
             try:
                 sample = Sample(path, auto_default_unpacker=False)
@@ -92,6 +95,19 @@ class UnpackerClient(object):
 
     def address_updated(self, address):
         pass
+
+
+class SimpleClient(UnpackerClient):
+
+    def __init__(self, event):
+        super()
+        self.event = event
+
+    def emu_paused(self):
+        self.event.set()
+
+    def emu_done(self):
+        self.event.set()
 
 
 class UnpackerEngine(object):
@@ -219,7 +235,7 @@ class UnpackerEngine(object):
             else:
                 self.apicall_counter[api_call_name] += 1
             if ret is not None:  # might be a void function
-                #print("RET: " + str(ret) + " APICALL_NAME: " + api_call_name)
+                # print("RET: " + str(ret) + " APICALL_NAME: " + api_call_name)
                 uc.mem_write(self.HOOK_ADDR, struct.pack("<I", ret))
             uc.reg_write(UC_X86_REG_ESP, esp)
         self.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
@@ -387,7 +403,7 @@ class UnpackerEngine(object):
         self.STACK_ADDR = 0x0
         self.STACK_SIZE = 1024 * 1024
         STACK_START = self.STACK_ADDR + self.STACK_SIZE
-        #self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.STACK_ADDR, "vsize": self.STACK_SIZE}]
+        # self.sample.unpacker.secs += [{"name": "stack", "vaddr": self.STACK_ADDR, "vsize": self.STACK_SIZE}]
         stack_sec_header = IMAGE_SECTION_HEADER(
             "stack".encode('ascii'),
             self.STACK_SIZE,
@@ -409,7 +425,7 @@ class UnpackerEngine(object):
             self.sample.unpacker.startaddr = self.entrypoint(pe)
         self.sample.loaded_image = pe.get_memory_mapped_image(ImageBase=self.sample.BASE_ADDR)
         self.sample.virtualmemorysize = align(self.sample.virtualmemorysize + 0x10000,
-                                             page_size=4096)  # Space possible IAT rebuilding
+                                              page_size=4096)  # Space possible IAT rebuilding
         self.sample.unpacker.virtualmemorysize = self.sample.virtualmemorysize
         self.uc.mem_map(self.sample.BASE_ADDR, self.sample.virtualmemorysize)
         self.uc.mem_write(self.sample.BASE_ADDR, self.sample.loaded_image)
@@ -425,7 +441,7 @@ class UnpackerEngine(object):
         self.uc.mem_map(self.STACK_ADDR, self.STACK_SIZE)
         self.uc.reg_write(UC_X86_REG_ESP, self.STACK_ADDR + int(self.STACK_SIZE / 2))
         self.uc.reg_write(UC_X86_REG_EBP, self.STACK_ADDR + int(self.STACK_SIZE / 2))
-        self.uc.mem_write(self.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1])) #-> PEtite Stack Operations?
+        self.uc.mem_write(self.uc.reg_read(UC_X86_REG_ESP) + 0x8, bytes([1]))  # -> PEtite Stack Operations?
         self.uc.reg_write(UC_X86_REG_EAX, self.sample.unpacker.startaddr)
         self.uc.reg_write(UC_X86_REG_EBX, self.PEB_BASE)
         self.uc.reg_write(UC_X86_REG_ECX, self.sample.unpacker.startaddr)
@@ -452,7 +468,7 @@ class UnpackerEngine(object):
         # init syscall handling and prepare hook memory for return values
         self.apicall_handler = WinApiCalls(self)
         self.uc.mem_map(self.HOOK_ADDR, 0x1000)
-        #self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.HOOK_ADDR, "vsize": 0x1000}]
+        # self.sample.unpacker.secs += [{"name": "hooks", "vaddr": self.HOOK_ADDR, "vsize": 0x1000}]
         hook_sec_header = IMAGE_SECTION_HEADER(
             "hooks".encode('ascii'),
             0x1000,
@@ -467,7 +483,6 @@ class UnpackerEngine(object):
         )
         self.sample.unpacker.secs.append(SectionHeader(stack_sec_header))
 
-
         hexstr = bytes.fromhex('000000008b0425') + struct.pack('<I', self.HOOK_ADDR) + bytes.fromhex(
             'c3')  # mov eax, [HOOK]; ret -> values of syscall are stored in eax
         self.uc.mem_write(self.HOOK_ADDR, hexstr)
@@ -475,7 +490,8 @@ class UnpackerEngine(object):
         # handle imports
         # TODO Update when custom loader available
         for lib in pe.DIRECTORY_ENTRY_IMPORT:
-            descriptor = ImportDescriptor(None, lib.struct.Characteristics, lib.struct.TimeDateStamp, lib.struct.ForwarderChain, lib.struct.Name, lib.struct.FirstThunk)
+            descriptor = ImportDescriptor(None, lib.struct.Characteristics, lib.struct.TimeDateStamp,
+                                          lib.struct.ForwarderChain, lib.struct.Name, lib.struct.FirstThunk)
             fct_list = []
             for i in lib.imports:
                 fct_list.append(i.name)
@@ -489,7 +505,6 @@ class UnpackerEngine(object):
                 self.uc.mem_write(func.address, struct.pack('<I', curr_hook_addr))
 
         hdr = PE(self.uc, self.sample.BASE_ADDR)
-
 
         # Patch DLLs with hook
         # Hardcoded values used for speed improvement -> Offsets can be calculated with utils.calc_export_offset_of_dll

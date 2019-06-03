@@ -4,47 +4,10 @@ import sys
 import threading
 from unittest import TestCase
 
-from unipacker.core import UnpackerEngine, UnpackerClient, Sample
+from unipacker.core import UnpackerEngine, Sample, SimpleClient
 from unipacker.unpackers import get_unpacker
+from unipacker.utils import RepeatedTimer
 
-
-class Client(UnpackerClient):
-
-    def __init__(self, event):
-        super()
-        self.event = event
-
-    def emu_paused(self):
-        self.event.set()
-
-    def emu_done(self):
-        self.event.set()
-
-
-class RepeatedTimer(object):
-    def __init__(self, interval, function, *args, **kwargs):
-        self._timer = None
-        self.interval = interval
-        self.function = function
-        self.args = args
-        self.kwargs = kwargs
-        self.is_running = False
-        self.start()
-
-    def _run(self):
-        self.is_running = False
-        self.start()
-        self.function(*self.args, **self.kwargs)
-
-    def start(self):
-        if not self.is_running:
-            self._timer = threading.Timer(self.interval, self._run)
-            self._timer.start()
-            self.is_running = True
-
-    def stop(self):
-        self._timer.cancel()
-        self.is_running = False
 
 def calc_md5(sample):
     BUF_SIZE = 65536
@@ -110,7 +73,7 @@ class EngineTest(TestCase):
         sample = Sample(sample_path)
         unpacker, _ = get_unpacker(sample)
         event = threading.Event()
-        client = Client(event)
+        client = SimpleClient(event)
         heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
 
         engine = UnpackerEngine(sample)

@@ -11,12 +11,14 @@ from unipacker.utils import InvalidPEFile
 class DefaultUnpacker(object):
 
     def __init__(self, sample):
+        self.name = "unknown"
         self.sample = sample
 
         self.secs = sample.sections
         self.BASE_ADDR = sample.opt_header.ImageBase
         self.ep = sample.opt_header.AddressOfEntryPoint + self.BASE_ADDR
-        self.allowed_sections = [s.Name for s in self.secs if s.VirtualAddress + self.BASE_ADDR <= self.ep < s.VirtualAddress + s.VirtualSize + self.BASE_ADDR]
+        self.allowed_sections = [s.Name for s in self.secs if
+                                 s.VirtualAddress + self.BASE_ADDR <= self.ep < s.VirtualAddress + s.VirtualSize + self.BASE_ADDR]
 
         self.section_hopping_control = len(self.allowed_sections) > 0
         self.dumper = ImageDump()
@@ -110,6 +112,7 @@ class UPXUnpacker(AutomaticDefaultUnpacker):
 
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "UPX"
         self.allowed_sections = []
         self.dumper = UPXDump()
         for s in self.secs:
@@ -122,6 +125,7 @@ class PEtiteUnpacker(AutomaticDefaultUnpacker):
 
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "PEtite"
         ep = sample.opt_header.AddressOfEntryPoint
         for s in self.secs:
             start_addr = s.VirtualAddress
@@ -129,8 +133,8 @@ class PEtiteUnpacker(AutomaticDefaultUnpacker):
             if start_addr <= ep <= end_addr:
                 finish = end_addr
 
-        #self.allowed_sections = ['.text']
-        #self.allowed_addr_ranges = self.get_allowed_addr_ranges()
+        # self.allowed_sections = ['.text']
+        # self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.allowed_addr_ranges.extend([(ep + self.BASE_ADDR, finish + self.BASE_ADDR)])
         self.dumper = PEtiteDump()
 
@@ -141,10 +145,10 @@ class PEtiteUnpacker(AutomaticDefaultUnpacker):
         return super().is_allowed(address)
 
 
-
 class ASPackUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "ASPack"
         self.allowed_sections = ['.aspack']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = ASPackDump()
@@ -153,6 +157,7 @@ class ASPackUnpacker(AutomaticDefaultUnpacker):
 class FSGUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "FSG"
         self.allowed_sections = []
         self.dumper = FSGDump()
         for s in self.secs:
@@ -164,6 +169,7 @@ class FSGUnpacker(AutomaticDefaultUnpacker):
 class YZPackUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "YZPack"
         self.allowed_sections = ['.yzpack', '.yzpack2']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = YZPackDump()
@@ -172,6 +178,7 @@ class YZPackUnpacker(AutomaticDefaultUnpacker):
 class MEWUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "MEW"
         self.allowed_sections = []
         self.section_hopping_control = True
         self.dumper = MEWDump()
@@ -183,6 +190,7 @@ class MEWUnpacker(AutomaticDefaultUnpacker):
 class MPRESSUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "MPRESS"
         self.allowed_sections = [".MPRESS2"]
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
         self.dumper = MPRESSDump()
@@ -206,7 +214,7 @@ def identifypacker(sample, yar):
     matches = rules.match(sample)
     result = generate_label(matches)
     if result == 'unknown':
-        print("This packer is unknown. Using default unpacker")
+        print(f"The packer used for {sample} is unknown. Using default unpacker")
         return 'unknown', matches
 
     return result, matches

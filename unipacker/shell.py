@@ -1,3 +1,4 @@
+import argparse
 import builtins
 import os
 import re
@@ -13,12 +14,21 @@ from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC
     UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
 
 import unipacker
-from unipacker.headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, print_section_table, \
-    pe_write
 from unipacker.core import UnpackerClient, UnpackerEngine, Sample
+from unipacker.headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, \
+    print_section_table, \
+    pe_write
+from unipacker.io_handler import IOHandler
 from unipacker.utils import get_reg_values, get_string, print_cols, merge, remove_range
 
 _print = builtins.print
+
+
+def file_or_dir(path):
+    if os.path.exists(path):
+        return path
+    else:
+        raise argparse.ArgumentTypeError(f"{path} is not a valid path")
 
 
 class Shell(Cmd, UnpackerClient):
@@ -26,13 +36,42 @@ class Shell(Cmd, UnpackerClient):
     def __init__(self):
         try:
             Cmd.__init__(self)
+            self.allow_cli_args = False
             builtins.print = self.shell_print
             self.histfile = ".unpacker_history"
             self.clear_queue = False
             self.sample = None
-            while True:
-                self.sample_loop()
-                self.shell_event.wait()
+            parser = argparse.ArgumentParser(
+                prog='unipacker',
+                description='Automatic and platform-independent unpacker for Windows binaries based on emulation')
+            parser.add_argument('samples', metavar='sample', type=file_or_dir, nargs='*',
+                                help='The path to a sample (or directory containing samples) you want unpacked')
+            parser.add_argument('-d', '--dest', nargs='?', default='.',
+                                help='The destination directory for unpacked binaries')
+            parser.add_argument('-p', '--partition-by-packer', action='store_true',
+                                help='Group the unpacked files by packer')
+            parser.add_argument('-i', '--interactive', action='store_true',
+                                help='Open the chosen sample(s) in the un{i}packer shell')
+
+            args = parser.parse_args()
+            if args.samples:
+                samples = []
+                for s in args.samples:
+                    if os.path.exists(s):
+                        samples.extend(Sample.get_samples(s, interactive=args.interactive))
+                    else:
+                        print(f"Path does not exist: {s}")
+                if args.interactive:
+                    while True:
+                        self.sample_loop(samples)
+                        self.shell_event.wait()
+                        samples = None
+                else:
+                    IOHandler(samples, args.dest, args.partition_by_packer)
+            else:
+                while True:
+                    self.sample_loop()
+                    self.shell_event.wait()
 
         except EOFError:
             with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
@@ -44,12 +83,16 @@ class Shell(Cmd, UnpackerClient):
         kwargs["file"] = self.stdout
         _print(*args, **kwargs)
 
-    def sample_loop(self):
-        sample_path, known_samples = self.get_path_from_user()
-        for self.sample in Sample.get_samples(sample_path):
+    def sample_loop(self, samples=None):
+        known_samples = self.init_banner_and_history()
+        if not samples:
+            sample_path = self.get_path_from_user(known_samples)
+            samples = Sample.get_samples(sample_path)
+        for self.sample in samples:
             print(f"\nNext up: {self.sample}")
             with open(".unpacker_history", "w") as f:
-                f.writelines("\n".join(sorted(set([f"{self.sample.yara_matches[-1]};{self.sample.path}"] + known_samples))))
+                f.writelines(
+                    "\n".join(sorted(set([f"{self.sample.unpacker.name};{self.sample.path}"] + known_samples[:-1]))))
 
             self.init_engine()
 
@@ -69,14 +112,7 @@ class Shell(Cmd, UnpackerClient):
         self.engine.register_client(self)
         self.address_updated(self.sample.unpacker.startaddr)
 
-    def get_path_from_user(self):
-        with open(f"{os.path.dirname(unipacker.__file__)}/banner") as f:
-            print(f.read())
-        if not os.path.exists(self.histfile):
-            open(self.histfile, "w+").close()
-        with open(self.histfile) as f:
-            known_samples = f.read().splitlines()[:10] + ["New sample..."]
-
+    def get_path_from_user(self, known_samples):
         print("Your options for today:\n")
         lines = []
         for i, s in enumerate(known_samples):
@@ -102,10 +138,19 @@ class Shell(Cmd, UnpackerClient):
                 print(f"Invalid ID. Allowed range: 0 - {len(known_samples) - 1}")
                 continue
             if os.path.exists(path):
-                return path, known_samples[:-1]
+                return path
             else:
                 print("Path does not exist")
                 continue
+
+    def init_banner_and_history(self):
+        with open(f"{os.path.dirname(unipacker.__file__)}/banner") as f:
+            print(f.read())
+        if not os.path.exists(self.histfile):
+            open(self.histfile, "w+").close()
+        with open(self.histfile) as f:
+            known_samples = f.read().splitlines()[:10] + ["New sample..."]
+        return known_samples
 
     def emu_started(self):
         self.started = True
