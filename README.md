@@ -7,7 +7,7 @@
                   \_\     /_/ | |
                               |_|
 
-# Un{i}packer   [![PyPI: unipacker](https://badge.fury.io/py/unipacker.svg)](https://pypi.org/project/unipacker/)
+# Un{i}packer   [![PyPI: unipacker](https://badge.fury.io/py/unipacker.svg)](https://pypi.org/project/unipacker/) [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/vfsrfs/unipacker.svg)](https://hub.docker.com/r/vfsrfs/unipacker)
 
 | | |
 |---|---|
@@ -24,7 +24,7 @@ In order to be able to analyze a packed malware sample, it is often required to 
 that the analyst will have to manually unpack the binary by using dynamic analysis techniques (Tools: OllyDbg, x64Dbg).
 There are also some approaches for automatic unpacking, but they are all only available for Windows. Therefore when
 targeting a packed Windows malware the analyst will require a Windows machine. The goal of our project is to enable
-platform independent automatic unpacking by using emulation.
+platform independent automatic unpacking by using emulation that yields runnable Windows binaries.
 
 ## Fully supported packers
 
@@ -44,22 +44,21 @@ press ```Enter```
 
 ## Usage
 ### Normal installation
-Install the [YARA](https://github.com/VirusTotal/yara) package for your OS
+Install the [YARA](https://github.com/VirusTotal/yara) package for your OS, get Un{i}packer from PyPi and start it using the automatically created command line wrapper:
 ```
 pip3 install unipacker
 unipacker
 ```
-**Attention!** It is strongly advised to use the requirements.txt, as we use a custom version of unicorn-engine that differs
-from the PyPi package version. Additionally, one might accidentally install the "yara" pip package instead of "yara-python",
-which will lead to errors.
-
 For detailed instructions on how to use Un{i}packer please refer to the [Wiki](https://github.com/unipacker/unipacker/wiki).
 Additionally, all of the shell commands are documented. To access this information, use the ```help``` command
+
+### Development mode installation
+Clone the repository, and inside the project root folder activate development mode using ```pip3 install -e .```
+
 ### Using Docker
 You can also use the provided Dockerfile to run a containerized version of Un{i}packer:
 ```
-docker build -t unipacker . && \
-docker run -it -v ~/local_samples:/root/unipacker/local_samples unipacker
+docker run -it -v ~/local_samples:/root/unipacker/local_samples vfsrfs/unipacker
 ```
 Assuming you have a folder called ```local_samples``` in your home directory, this will be mounted inside the container.
 Un{i}packer will thus be able to access those binaries via ```/root/unipacker/local_samples```
