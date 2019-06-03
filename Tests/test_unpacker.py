@@ -136,8 +136,8 @@ class EngineTest(TestCase):
                 continue
             print(f"Testing file: {file}")
             self.prepare_test(directory + file)
-            new_md5 = self.calc_md5("unpacked.exe").hexdigest()
-            old_md5 = self.calc_md5("Tests/UnpackedSample/" + packer + "unpacked_" + file).hexdigest()
+            new_md5 = calc_md5("unpacked.exe").hexdigest()
+            old_md5 = calc_md5("Tests/UnpackedSample/" + packer + "unpacked_" + file).hexdigest()
             hashes.append((file, old_md5, new_md5))
         print(f"\n--- Done, checking for success ---")
         return hashes
