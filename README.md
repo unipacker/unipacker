@@ -46,8 +46,8 @@ press ```Enter```
 ### Normal installation
 Install the [YARA](https://github.com/VirusTotal/yara) package for your OS
 ```
-pip3 install -r requirements.txt
-python3 unipacker.py
+pip install unipacker
+unipacker
 ```
 **Attention!** It is strongly advised to use the requirements.txt, as we use a custom version of unicorn-engine that differs
 from the PyPi package version. Additionally, one might accidentally install the "yara" pip package instead of "yara-python",
