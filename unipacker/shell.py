@@ -57,9 +57,11 @@ class Shell(Cmd, UnpackerClient):
                                 help='Group the unpacked files by packer')
             parser.add_argument('-i', '--interactive', action='store_true',
                                 help='Open the chosen sample(s) in the un{i}packer shell')
-            parser.add_argument('--version', action=print_version_and_exit, help='Show version information and exit')
+            parser.add_argument('--version', action='store_true', help='Show version information and exit')
 
             args = parser.parse_args()
+            if args.version:
+                print_version_and_exit()
             if args.samples:
                 samples = []
                 for s in args.samples:
