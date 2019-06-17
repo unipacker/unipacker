@@ -25,6 +25,8 @@ setup(
         'pefile',
         'cmd2',
         'unicorn-unipacker',
+        'capstone',
+        'colorama',
         'pyreadline; platform_system == "Windows"',
         'gnureadline; platform_system == "Darwin"',
     ],

@@ -4,13 +4,18 @@ import struct
 import threading
 
 import pefile
+from capstone.x86_const import X86_GRP_JUMP
+from colorama import Fore
+from unicorn import unicorn
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EIP, \
     UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
 
 
 def print_cols(lines):
+    if not lines:
+        return
     max_cols = max(len(line) for line in lines)
-    lines = [line + ("", )*(max_cols - len(line)) for line in lines]
+    lines = [line + ("",) * (max_cols - len(line)) for line in lines]
     cols = zip(*lines)
     col_widths = [max(len(str(word)) for word in col) + 2 for col in cols]
     for line in lines:
@@ -199,3 +204,92 @@ class RepeatedTimer(object):
     def stop(self):
         self._timer.cancel()
         self.is_running = False
+
+
+def jump_taken(uc, instr):
+    efl = uc.reg_read(UC_X86_REG_EFLAGS)
+    zf = efl & 0x40 > 0
+    sf = efl & 0x80 > 0
+    of = efl & 0x800 > 0
+    cf = efl & 0x1 > 0
+    if "jmp" in instr.mnemonic:
+        return True
+    if "je" in instr.mnemonic:
+        return zf
+    if "jne" in instr.mnemonic:
+        return not zf
+    if "jg" in instr.mnemonic:
+        return sf == of and not zf
+    if "jge" in instr.mnemonic:
+        return sf == of or zf
+    if "ja" in instr.mnemonic:
+        return not cf and not zf
+    if "jae" in instr.mnemonic:
+        return not cf or zf
+    if "jl" in instr.mnemonic:
+        return sf != of
+    if "jle" in instr.mnemonic:
+        return sf != of or zf
+    if "jb" in instr.mnemonic:
+        return cf
+    if "jbe" in instr.mnemonic:
+        return cf or zf
+    if "jo" in instr.mnemonic:
+        return of
+    if "jno" in instr.mnemonic:
+        return not of
+    if "jz" in instr.mnemonic:
+        return zf
+    if "jnz" in instr.mnemonic:
+        return not zf
+    if "js" in instr.mnemonic:
+        return sf
+    if "jns" in instr.mnemonic:
+        return not sf
+    print(f"Unidentified jump! {instr.mnemonic}")
+    return False
+
+
+def print_single_disass(disassembler, uc, address, size):
+    disass = disassembler.disasm(uc.mem_read(address, size), address, count=1)
+    lines = []
+    for i in disass:
+        lines += [disass_instruction(uc, i)]
+    print('\n'.join(lines))
+
+
+def disass_n(uc, disassembler, address, n_instr, base_alias=""):
+    i = 0
+    offset = 0
+    while i < n_instr:
+        for instr in disassembler.disasm(uc.mem_read(address + offset, 15), address + offset, count=1):
+            print(disass_instruction(uc, instr, f"{base_alias}+{offset}" if base_alias else ""))
+            offset += instr.size
+            i += 1
+
+
+def disass_instruction(uc, instr, addr_alias=""):
+    if instr.id == 0:
+        pass
+    (regs_read, regs_write) = instr.regs_access()
+    reg_values = {}
+    for r in regs_read:
+        uc_constant = getattr(unicorn.x86_const, f"UC_X86_REG_{instr.reg_name(r).upper()}", None)
+        if uc_constant:
+            reg_values[instr.reg_name(r)] = uc.reg_read(uc_constant)
+    reg_values_str = ' '.join([f"{name}=0x{value:02x}" for name, value in reg_values.items()])
+    if X86_GRP_JUMP in instr.groups:
+        if jump_taken(uc, instr):
+            color = Fore.LIGHTGREEN_EX
+            comment = f"; taken! {reg_values_str}"
+        else:
+            color = Fore.LIGHTRED_EX
+            comment = f"; not taken! {reg_values_str}"
+    else:
+        color = Fore.RESET
+        comment = f"; {reg_values_str}" if reg_values_str else ""
+    mnemonic = f"{color}{instr.mnemonic}{Fore.RESET}"
+    addr_alias = f"0x{instr.address:02x}, {Fore.LIGHTRED_EX}{addr_alias}{Fore.RESET}" if addr_alias \
+        else f"0x{instr.address:02x}"
+    return f">>> {addr_alias}: {mnemonic} {Fore.LIGHTCYAN_EX}{instr.op_str}{Fore.RESET} " \
+           f"{Fore.LIGHTBLUE_EX}{comment}{Fore.RESET}"

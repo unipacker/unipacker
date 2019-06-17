@@ -1,10 +1,11 @@
-import collections
+import struct
 import struct
 import time
 from ctypes import *
 from inspect import signature
 
 import pefile
+from colorama import Fore
 from unicorn.x86_const import UC_X86_REG_EAX
 
 from unipacker.kernel_structs import _FILETIME
@@ -177,7 +178,8 @@ class WinApiCalls(object):
         if not mapped_partial:
             uc.mem_map(aligned_address, aligned_size)
         log and print(f"\tfrom 0x{aligned_address:02x} to 0x{(aligned_address + aligned_size):02x}")
-        self.sample.allocated_chunks = list(merge(self.sample.allocated_chunks + [(aligned_address, aligned_address + aligned_size)]))
+        self.sample.allocated_chunks = list(
+            merge(self.sample.allocated_chunks + [(aligned_address, aligned_address + aligned_size)]))
         log and self.print_allocs()
         self.alloc_sizes[aligned_address] = aligned_size
         return aligned_address
@@ -255,7 +257,8 @@ class WinApiCalls(object):
             hook_addr = self.add_hook(uc, proc_name, module_name)
             log and print(f"\tAdded new hook at 0x{hook_addr:02x}")
         if proc_name in self.pending_breakpoints:
-            print(f"\x1b[31mPending breakpoint attached for new dynamic import {proc_name} at 0x{hook_addr:02x}\x1b[0m")
+            print(f"{Fore.LIGHTRED_EX}Pending breakpoint attached for new dynamic import {proc_name} "
+                  f"at 0x{hook_addr:02x}{Fore.RESET}")
             self.breakpoints.add(hook_addr)
             self.pending_breakpoints.remove(proc_name)
 
@@ -322,7 +325,7 @@ class WinApiCalls(object):
     def MessageBoxA(self, uc, esp, log, owner, text_ptr, title_ptr, type):
         text = get_string(text_ptr, uc)
         title = get_string(title_ptr, uc)
-        print(f"\x1b[31mMessage Box ({title}): {text}\x1b[0m")
+        print(f"{Fore.LIGHTRED_EX}Message Box ({title}): {text}{Fore.RESET}")
         return 1
 
     @api_call()
