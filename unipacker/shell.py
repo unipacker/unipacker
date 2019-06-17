@@ -87,7 +87,7 @@ class Shell(Cmd, UnpackerClient):
                     self.sample_loop()
                     self.shell_event.wait()
 
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
                 fortunes = f.read().splitlines()
             print(f"\n{Fore.LIGHTRED_EX}{choice(fortunes)}{Fore.RESET}\n")
