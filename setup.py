@@ -1,6 +1,7 @@
+import unipacker
 from setuptools import setup, find_packages
 
-__VERSION__ = "1.0.1"
+__VERSION__ = unipacker.__VERSION__
 __NAME__ = 'unipacker'
 
 with open('README.md') as readme_file:

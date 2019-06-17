@@ -31,6 +31,11 @@ def file_or_dir(path):
         raise argparse.ArgumentTypeError(f"{path} is not a valid path")
 
 
+def print_version_and_exit(*args, **kwargs):
+    print(f"Unipacker {unipacker.__VERSION__}")
+    raise SystemExit
+
+
 class Shell(Cmd, UnpackerClient):
 
     def __init__(self):
@@ -52,6 +57,7 @@ class Shell(Cmd, UnpackerClient):
                                 help='Group the unpacked files by packer')
             parser.add_argument('-i', '--interactive', action='store_true',
                                 help='Open the chosen sample(s) in the un{i}packer shell')
+            parser.add_argument('--version', action=print_version_and_exit, help='Show version information and exit')
 
             args = parser.parse_args()
             if args.samples:
@@ -145,7 +151,12 @@ class Shell(Cmd, UnpackerClient):
 
     def init_banner_and_history(self):
         with open(f"{os.path.dirname(unipacker.__file__)}/banner") as f:
-            print(f.read())
+            lines = f.read().splitlines()
+            width = len(max(lines, key=builtins.len))
+            lines = list(map(lambda l: l.ljust(width), lines))
+            version_str = "v" + unipacker.__VERSION__
+            lines[0] = lines[0][:-len(version_str)] + version_str
+            print('\n'.join(lines))
         if not os.path.exists(self.histfile):
             open(self.histfile, "w+").close()
         with open(self.histfile) as f:
