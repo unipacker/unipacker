@@ -24,7 +24,7 @@ setup(
         'yara-python',
         'pefile',
         'cmd2',
-        'unicorn-unipacker',
+        'unicorn-unipacker==1.0.3b1',
         'pyreadline; platform_system == "Windows"',
         'gnureadline; platform_system == "Darwin"',
     ],
