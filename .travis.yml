@@ -38,4 +38,4 @@ matrix:
   - os: windows
 
 script:
-- python3 -m pytest -s
+- python3 -m pytest -s || python -m pytest -s
