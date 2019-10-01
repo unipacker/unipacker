@@ -60,12 +60,13 @@ rule fsg{
 rule pecompact{
     meta:
         description = "PECompact packed file"
-        date = "2019-01-22"
+        date = "2019-06-09"
     strings:
         $pec1 = {70656331}
         $pec2 = {70656332}
+        $pec = "PECompact2"
     condition:
-        pe32 and $pec1 at 0x01c8 and $pec2 at 0x01f0
+        pe32 and (($pec1 at 0x01c8 and $pec2 at 0x01f0) or $pec)
 }
 
 rule upack{
