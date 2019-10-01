@@ -213,6 +213,7 @@ class MPRESSUnpacker(AutomaticDefaultUnpacker):
 class PECompactUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
+        self.name = "PECompact"
         self.dumper = PECompactDump()
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
