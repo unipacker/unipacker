@@ -9,6 +9,8 @@ from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC
 
 
 def print_cols(lines):
+    if not lines:
+        return
     max_cols = max(len(line) for line in lines)
     lines = [line + ("", )*(max_cols - len(line)) for line in lines]
     cols = zip(*lines)
