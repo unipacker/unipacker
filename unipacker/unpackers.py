@@ -4,8 +4,7 @@ import sys
 import yara
 
 import unipacker
-from unipacker.imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump, PEtiteDump, \
-    PECompactDump
+from unipacker.imagedump import ImageDump, ImportRebuilderDump, PEtiteDump, MEWDump
 from unipacker.utils import InvalidPEFile
 
 
@@ -115,7 +114,7 @@ class UPXUnpacker(AutomaticDefaultUnpacker):
         super().__init__(sample)
         self.name = "UPX"
         self.allowed_sections = []
-        self.dumper = UPXDump()
+        self.dumper = ImportRebuilderDump()
         for s in self.secs:
             if s.SizeOfRawData > 0:
                 self.allowed_sections += [s.Name]
@@ -152,7 +151,7 @@ class ASPackUnpacker(AutomaticDefaultUnpacker):
         self.name = "ASPack"
         self.allowed_sections = ['.aspack']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
-        self.dumper = ASPackDump()
+        self.dumper = ImportRebuilderDump()
 
 
 class FSGUnpacker(AutomaticDefaultUnpacker):
@@ -160,7 +159,7 @@ class FSGUnpacker(AutomaticDefaultUnpacker):
         super().__init__(sample)
         self.name = "FSG"
         self.allowed_sections = []
-        self.dumper = FSGDump()
+        self.dumper = ImportRebuilderDump()
         for s in self.secs:
             if s.SizeOfRawData > 0:
                 self.allowed_sections += [s.Name]
@@ -173,7 +172,7 @@ class YZPackUnpacker(AutomaticDefaultUnpacker):
         self.name = "YZPack"
         self.allowed_sections = ['.yzpack', '.yzpack2']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
-        self.dumper = YZPackDump()
+        self.dumper = ImportRebuilderDump()
 
 
 class MEWUnpacker(AutomaticDefaultUnpacker):
@@ -194,7 +193,7 @@ class MPRESSUnpacker(AutomaticDefaultUnpacker):
         self.name = "MPRESS"
         self.allowed_sections = [".MPRESS2"]
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
-        self.dumper = MPRESSDump()
+        self.dumper = ImportRebuilderDump()
         self.swap_status = 0
 
     def is_allowed(self, address):
@@ -214,7 +213,7 @@ class PECompactUnpacker(AutomaticDefaultUnpacker):
     def __init__(self, sample):
         super().__init__(sample)
         self.name = "PECompact"
-        self.dumper = PECompactDump()
+        self.dumper = ImportRebuilderDump()
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
 
 
