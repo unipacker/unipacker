@@ -4,6 +4,8 @@ import sys
 import threading
 from unittest import TestCase
 
+from colorama import Fore
+
 from unipacker.core import UnpackerEngine, Sample, SimpleClient
 from unipacker.unpackers import get_unpacker
 from unipacker.utils import RepeatedTimer
@@ -22,7 +24,6 @@ def calc_md5(sample):
 
 
 class IntegrityTest(TestCase):
-
     hashes = {
         "VMProtect/UnPackMe_VMProtect_1.53.exe": "b1db0a24d4e1488b1704767ba0688910",
         "ASPack/lbop20_aspack.exe": "7681ec362dca4db23c62a239eddcc67f",
@@ -67,9 +68,11 @@ class IntegrityTest(TestCase):
                         test_path = os.path.join(rt2, f)
                         relative_test_path = test_path.split(f"Sample{os.path.sep}")[1]
                         if relative_test_path not in self.hashes:
-                            print(f"\x1b[31mWarning: Unknown file {relative_test_path} found in sample directory\x1b[0m")
+                            print(
+                                f"{Fore.LIGHTRED_EX}Warning: Unknown file {relative_test_path} found in sample directory{Fore.RESET}")
                             continue
-                        self.assertTrue(calc_md5(test_path).hexdigest() == self.hashes[relative_test_path], f"Tested file: {relative_test_path}. Expected: {self.hashes[relative_test_path]}, got: {calc_md5(test_path).hexdigest()}")
+                        self.assertTrue(calc_md5(test_path).hexdigest() == self.hashes[relative_test_path],
+                                        f"Tested file: {relative_test_path}. Expected: {self.hashes[relative_test_path]}, got: {calc_md5(test_path).hexdigest()}")
                         print(f"Tested:{relative_test_path}, MD5: {calc_md5(test_path).hexdigest()}")
 
 
@@ -90,7 +93,6 @@ class EngineTest(TestCase):
         heartbeat.stop()
         engine.stop()
         print(f"\n--- Emulation of {os.path.basename(sample_path)} finished ---")
-
 
     def perform_test(self, packer, ignore):
         curr_path = os.getcwd()

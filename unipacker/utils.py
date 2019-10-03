@@ -261,14 +261,16 @@ def print_single_disass(disassembler, uc, address, size):
 def disass_n(uc, disassembler, address, n_instr, base_alias=""):
     i = 0
     offset = 0
+    lines = []
     while i < n_instr:
         for instr in disassembler.disasm(uc.mem_read(address + offset, 15), address + offset, count=1):
-            print(disass_instruction(uc, instr, f"{base_alias}+{offset}" if base_alias else ""))
+            lines += [disass_instruction(uc, instr, f"{base_alias}+{offset}" if base_alias else "", columns=True)]
             offset += instr.size
             i += 1
+    print_cols(lines)
 
 
-def disass_instruction(uc, instr, addr_alias=""):
+def disass_instruction(uc, instr, addr_alias="", columns=False):
     if instr.id == 0:
         pass
     (regs_read, regs_write) = instr.regs_access()
@@ -291,5 +293,8 @@ def disass_instruction(uc, instr, addr_alias=""):
     mnemonic = f"{color}{instr.mnemonic}{Fore.RESET}"
     addr_alias = f"0x{instr.address:02x}, {Fore.LIGHTRED_EX}{addr_alias}{Fore.RESET}" if addr_alias \
         else f"0x{instr.address:02x}"
-    return f">>> {addr_alias}: {mnemonic} {Fore.LIGHTCYAN_EX}{instr.op_str}{Fore.RESET} " \
-           f"{Fore.LIGHTBLUE_EX}{comment}{Fore.RESET}"
+
+    disass_cols = f">>> {addr_alias}:", f"{mnemonic} {Fore.LIGHTCYAN_EX}{instr.op_str}{Fore.RESET}", f"{Fore.LIGHTBLUE_EX}{comment}{Fore.RESET}"
+    if columns:
+        return disass_cols
+    return " ".join(disass_cols)
