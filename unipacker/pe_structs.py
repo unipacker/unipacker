@@ -10,6 +10,98 @@ class _IMAGE_DATA_DIRECTORY(Structure):
         ("Size", c_uint32),
     ]
 
+class EXPORT_ADDRESS_TABLE(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("Export RVA", c_uint32),
+        ("Forwarder RVA", c_uint32),
+    ]
+
+class IMAGE_EXPORT_DIRECTORY(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("Characteristics", c_uint32),
+        ("TimeDateStamp", c_uint32),
+        ("MajorVersion", c_uint16),
+        ("MinorVersion", c_uint16),
+        ("Name", c_uint32),
+        ("Base", c_uint32),
+        ("NumberOfFunctions", c_uint32),
+        ("NumberOfNames", c_uint32),
+        ("AddressOfFunctions", c_uint32),
+        ("AddressOfNames", c_uint32),
+        ("AddressOfNameOrdinals", c_uint32),
+    ]
+
+class ExportDirectoryTable(object):
+    def __init__(self, image_export_directory, Characteristics=None, TimeDateStamp=None, MajorVersion=None, MinorVersion=None, Name=None, Base=None, NumberOfFunctions=None, NumberOfNames=None, AddressOfFunctions=None, AddressOfNames=None, AddressOfNameOrdinals=None):
+        if image_export_directory is not None:
+            self.Characteristics = getattr(image_export_directory, "Characteristics")
+            self.TimeDateStamp = getattr(image_export_directory, "TimeDataStamp")
+            self.MajorVersion = getattr(image_export_directory, "MajorVersion")
+            self.MinorVersion = getattr(image_export_directory, "MinorVersion")
+            self.Name = getattr(image_export_directory, "Name")
+            self.Base = getattr(image_export_directory, "Base")
+            self.NumberOfFunctions = getattr(image_export_directory, "NumberOfFunctions")
+            self.NumberOfNames = getattr(image_export_directory, "NumberOfNames")
+            self.AddressOfFunctions = getattr(image_export_directory, "AddressOfFunctions")
+            self.AddressOfNames = getattr(image_export_directory, "AddressOfNames")
+            self.AddressOfNameOrdinals = getattr(image_export_directory, "AddressOfNameOrdinals")
+
+        else:
+            self.Characteristics = Characteristics
+            self.TimeDateStamp = TimeDateStamp
+            self.MajorVersion = MajorVersion
+            self.MinorVersion = MinorVersion
+            self.Name = Name
+            self.Base = Base
+            self.NumberOfFunctions = NumberOfFunctions
+            self.NumberOfNames = NumberOfNames
+            self.AddressOfFunctions = AddressOfFunctions
+            self.AddressOfNames = AddressOfNames
+            self.AddressOfNameOrdinals = AddressOfNameOrdinals
+
+class Export(object):
+    def __init__(self):
+        export_rva = None
+        export_rva_offset = None
+
+        forwarder_offset = None
+        forwarder = None
+
+        name_offset = None
+        name = None
+
+        ordinal = None
+        ordinal_offset = None
+
+class _IMAGE_RESOURCE_DIRECTORY(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("Characteristics", c_uint32),
+        ("TimeDateStamp", c_uint32),
+        ("MajorVersion", c_uint16),
+        ("MinorVersion", c_uint16),
+        ("NumberOfNamedEntries", c_uint16),
+        ("NumberOfIdEntries", c_uint16),
+    ]
+
+class IMAGE_RESOURCE_DIRECTORY_ENTRY(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("Name/ID", c_uint32),
+        ("DataEntry/Subdirectory", c_uint32)
+    ]
+
+class _IMAGE_RESOURCE_DATA_ENTRY(Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("OffsetToData", c_uint32),
+        ("Size", c_uint32),
+        ("CodePage", c_uint32),
+        ("Reserved", c_uint32),
+    ]
+
 
 class DataDirectory(object):
     def __init__(self, image_data_directory):
