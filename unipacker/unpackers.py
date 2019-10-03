@@ -4,7 +4,8 @@ import sys
 import yara
 
 import unipacker
-from unipacker.imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump, PEtiteDump
+from unipacker.imagedump import ImageDump, YZPackDump, ASPackDump, FSGDump, MEWDump, UPXDump, MPRESSDump, PEtiteDump, \
+    PECompactDump
 from unipacker.utils import InvalidPEFile
 
 
@@ -209,6 +210,14 @@ class MPRESSUnpacker(AutomaticDefaultUnpacker):
         return True
 
 
+class PECompactUnpacker(AutomaticDefaultUnpacker):
+    def __init__(self, sample):
+        super().__init__(sample)
+        self.name = "PECompact"
+        self.dumper = PECompactDump()
+        self.allowed_addr_ranges = self.get_allowed_addr_ranges()
+
+
 def identifypacker(sample, yar):
     rules = yara.compile(filepath=yar)
     matches = rules.match(sample)
@@ -254,6 +263,7 @@ def get_unpacker(sample, auto_default_unpacker=True):
         "yzpack": YZPackUnpacker,
         "mew": MEWUnpacker,
         "mpress": MPRESSUnpacker,
+        "pecompact": PECompactUnpacker,
     }
 
     if "pe32" not in str(yara_matches):

@@ -43,6 +43,7 @@ class IntegrityTest(TestCase):
         "FSG/unpackme- FSG 1.31 - dulek.exe": "ed6c6067974ed35016ab025d4e08ac02",
         "FSG/unpackme- FSG 1.33 - dulek.exe": "ae293061d9cca63a18e17bc4bcb98c6a",
         "FSG/Lab18-02.exe": "9c5c27494c28ed0b14853b346b113145",
+        "PECompact/lbop20_PECompact.exe": "8d374b20bc6b68255ed4d869aeb93eac",
     }
 
     def generate_integrity(self):
@@ -63,8 +64,13 @@ class IntegrityTest(TestCase):
             for d in dir:
                 for rt2, dir2, f2 in os.walk(rt + d):
                     for f in f2:
-                        self.assertTrue(calc_md5(rt2 + '/' + f).hexdigest() == self.hashes[(rt2 + '/' + f).split('Sample/')[1]], f"Tested file: {(rt2 + '/' + f).split('Sample/')[1]}. Expected: {self.hashes[(rt2 + '/' + f).split('Sample/')[1]]}, got: {calc_md5(rt2 + '/' + f).hexdigest()}")
-                        print(f"Tested:{(rt2 + '/' + f).split('Sample/')[1]}, MD5: {calc_md5(rt2 + '/' + f).hexdigest()}")
+                        test_path = os.path.join(rt2, f)
+                        relative_test_path = test_path.split(f"Sample{os.path.sep}")[1]
+                        if relative_test_path not in self.hashes:
+                            print(f"\x1b[31mWarning: Unknown file {relative_test_path} found in sample directory\x1b[0m")
+                            continue
+                        self.assertTrue(calc_md5(test_path).hexdigest() == self.hashes[relative_test_path], f"Tested file: {relative_test_path}. Expected: {self.hashes[relative_test_path]}, got: {calc_md5(test_path).hexdigest()}")
+                        print(f"Tested:{relative_test_path}, MD5: {calc_md5(test_path).hexdigest()}")
 
 
 class EngineTest(TestCase):

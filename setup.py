@@ -23,8 +23,8 @@ setup(
     install_requires=[
         'yara-python',
         'pefile',
-        'cmd2',
-        'unicorn-unipacker',
+        'cmd2==0.9.12',
+        'unicorn-unipacker==1.0.3b7',
         'capstone',
         'colorama',
         'pyreadline; platform_system == "Windows"',

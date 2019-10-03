@@ -542,9 +542,17 @@ class MEWDump(ImageDump):
             ntp[section] = (True, True, True)
         return super().fix_section_mem_protections(hdr, ntp)
 
+
 class MPRESSDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
+
+class PECompactDump(ImageDump):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
+        print(dllname_to_functionlist)
+        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
 
 class UPXDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):

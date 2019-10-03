@@ -154,7 +154,7 @@ class Shell(Cmd, UnpackerClient):
             if 0 <= id < len(known_samples) - 1:
                 path = known_samples[id].split(";")[1]
             elif id == len(known_samples) - 1:
-                path = input("Please enter the sample path (single file or directory): ")
+                path = input("Please enter the sample path (single file or directory): ").rstrip()
             else:
                 print(f"Invalid ID. Allowed range: 0 - {len(known_samples) - 1}")
                 continue
