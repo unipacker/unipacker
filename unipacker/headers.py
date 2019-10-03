@@ -2,6 +2,7 @@ import struct
 from ctypes import *
 from datetime import datetime
 
+from colorama import Fore
 from unicorn import UcError
 
 from unipacker.pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
@@ -125,10 +126,10 @@ def parse_disk_to_header(sample, query_header=None):
 
         rva_to_IMAGE_IMPORT_DESCRIPTOR = getattr(getattr(opt_header, "DataDirectory")[1], "VirtualAddress")
         size_import_table = getattr(getattr(opt_header, "DataDirectory")[1], "Size")
-        #import_table = get_imp(uc, rva_to_IMAGE_IMPORT_DESCRIPTOR, base_addr, size_import_table)
+        # import_table = get_imp(uc, rva_to_IMAGE_IMPORT_DESCRIPTOR, base_addr, size_import_table)
         import_descriptor_table = []
         # TODO Use this when custom loader finished
-        #for x in range(int((size_import_table / header_sizes["IMAGE_IMPORT_DESCRIPTOR"]))):
+        # for x in range(int((size_import_table / header_sizes["IMAGE_IMPORT_DESCRIPTOR"]))):
         #    f.seek(rva_to_IMAGE_IMPORT_DESCRIPTOR)
         #    imp_descriptor_read = bytearray(f.read(header_sizes["IMAGE_IMPORT_DESCRIPTOR"]))
         #    imp_descriptor = IMAGE_IMPORT_DESCRIPTOR.from_buffer(imp_descriptor_read)
@@ -321,7 +322,7 @@ def print_struc(s, offset, name):
 
 def print_struc_rec(s, offset, name, indent='\t', array_dict=None):
     if name is not None:
-        print(f"\x1b[33m{name}:\x1b[0m")
+        print(f"{Fore.LIGHTYELLOW_EX}{name}:{Fore.RESET}")
     for field_name, field_type in s._fields_:
         if isinstance(getattr(s, field_name), Array):
             print(indent + f" +0x{offset:02x} {field_name}:")
@@ -339,11 +340,12 @@ def print_struc_rec(s, offset, name, indent='\t', array_dict=None):
             if isinstance(getattr(s, field_name), int):
                 if "TimeDateStamp" in field_name:
                     print(f"{indent} +0x{offset:02x} {field_name}: "
-                          "\x1b[31m"
+                          f"{Fore.LIGHTRED_EX}"
                           f"{datetime.utcfromtimestamp(getattr(s, field_name)).strftime('%Y-%m-%d %H:%M:%S')}"
-                          "\x1b[0m")
+                          f"{Fore.RESET}")
                 else:
-                    print(f"{indent} +0x{offset:02x} {field_name}: \x1b[31m{hex(getattr(s, field_name))}\x1b[0m")
+                    print(f"{indent} +0x{offset:02x} {field_name}: "
+                          f"{Fore.LIGHTRED_EX}{hex(getattr(s, field_name))}{Fore.RESET}")
             else:
                 print(f"\t +0x{offset:02x} {field_name}: {getattr(s, field_name)}")
             offset += len(bytes(field_type()))
@@ -380,16 +382,16 @@ def print_section_table(uc, base_addr):
 
 def print_iat(uc, base_addr):
     imp = parse_memory_to_header(uc, base_addr, "IMPORTS")
-    print("\x1b[33mIMPORT ADDRESS TABLE:\x1b[0m")
+    print(f"{Fore.LIGHTYELLOW_EX}IMPORT ADDRESS TABLE:{Fore.RESET}")
     for i in imp:
         indent = '\t'
         if i.Name == 0:
             return
-        print(f"{indent} Name: \x1b[31m{get_string(base_addr + i.Name, uc)}\x1b[0m")
-        print(f"{indent} Characteristics (Hint/Name): \x1b[31m{hex(i.Characteristics)}\x1b[0m")
-        print(f"{indent} TimeDateStamp: \x1b[31m{hex(i.TimeDateStamp)}\x1b[0m")
-        print(f"{indent} ForwarderChain: \x1b[31m{hex(i.ForwarderChain)}\x1b[0m")
-        print(f"{indent} FirstThunk: \x1b[31m{hex(i.FirstThunk)}\x1b[0m")
+        print(f"{indent} Name: {Fore.LIGHTRED_EX}{get_string(base_addr + i.Name, uc)}{Fore.RESET}")
+        print(f"{indent} Characteristics (Hint/Name): {Fore.LIGHTRED_EX}{hex(i.Characteristics)}{Fore.RESET}")
+        print(f"{indent} TimeDateStamp: {Fore.LIGHTRED_EX}{hex(i.TimeDateStamp)}{Fore.RESET}")
+        print(f"{indent} ForwarderChain: {Fore.LIGHTRED_EX}{hex(i.ForwarderChain)}{Fore.RESET}")
+        print(f"{indent} FirstThunk: {Fore.LIGHTRED_EX}{hex(i.FirstThunk)}{Fore.RESET}")
         indent = '\t\t'
 
         if i.Characteristics == 0:
@@ -402,10 +404,11 @@ def print_iat(uc, base_addr):
                 continue
             while imp_array_element != 0:
                 if imp_array_element >> 0x1f == 1:
-                    print(f"{indent} Import by Ordinal: \x1b[31m{hex(imp_array_element - 0x80000000)}\x1b[0m")
+                    print(f"{indent} Import by Ordinal: "
+                          f"{Fore.LIGHTRED_EX}{hex(imp_array_element - 0x80000000)}{Fore.RESET}")
                 else:
                     print(f"{indent} Import by Name: "
-                          f"\x1b[31m{get_string(base_addr + imp_array_element + 0x2, uc)}\x1b[0m")
+                          f"{Fore.LIGHTRED_EX}{get_string(base_addr + imp_array_element + 0x2, uc)}{Fore.RESET}")
                 curr_pos += 0x4
                 imp_array_element = struct.unpack("<I", uc.mem_read(base_addr + i.Characteristics + curr_pos, 4))[0]
 

@@ -6,6 +6,8 @@ import threading
 from time import time
 
 import pefile
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+from colorama import Fore
 from unicorn import *
 from unicorn.x86_const import *
 
@@ -15,7 +17,7 @@ from unipacker.headers import PE, get_disk_headers, conv_to_class_header, parse_
 from unipacker.kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unipacker.pe_structs import SectionHeader, IMAGE_SECTION_HEADER, ImportDescriptor, Import
 from unipacker.unpackers import get_unpacker
-from unipacker.utils import merge, align, convert_to_string, InvalidPEFile
+from unipacker.utils import merge, align, convert_to_string, InvalidPEFile, print_single_disass
 
 
 class Sample(object):
@@ -145,6 +147,9 @@ class UnpackerEngine(object):
         self.PEB_BASE = 0
         self.TEB_BASE = 0
 
+        self.disassembler = Cs(CS_ARCH_X86, CS_MODE_32)
+        self.disassembler.detail = True
+
         self.init_uc()
 
     def register_client(self, client):
@@ -196,17 +201,18 @@ class UnpackerEngine(object):
         with self.data_lock:
             breakpoint_hit = address in self.breakpoints
         if breakpoint_hit:
-            print("\x1b[31mBreakpoint hit!\x1b[0m")
+            print(f"{Fore.LIGHTRED_EX}Breakpoint hit!{Fore.RESET}")
             self.pause()
         if address == self.sample.unpacker.endaddr:
-            print("\x1b[31mEnd address hit! Unpacking should be done\x1b[0m")
+            print(f"{Fore.LIGHTRED_EX}End address hit! Unpacking should be done{Fore.RESET}")
             self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
             self.pause()
 
         if self.sample.unpacker.write_execute_control and address not in self.apicall_handler.hooks and (
                 address < self.HOOK_ADDR or address > self.HOOK_ADDR + 0x1000):
             if any(lower <= address <= upper for (lower, upper) in sorted(self.write_targets)):
-                print(f"\x1b[31mTrying to execute at 0x{address:02x}, which has been written to before!\x1b[0m")
+                print(f"{Fore.LIGHTRED_EX}Trying to execute at 0x{address:02x}, "
+                      f"which has been written to before!{Fore.RESET}")
                 self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
                 self.pause()
 
@@ -214,7 +220,8 @@ class UnpackerEngine(object):
                 address < self.HOOK_ADDR or address > self.HOOK_ADDR + 0x1000):  # address-0x7 corresponding RET
             if not self.sample.unpacker.is_allowed(address):
                 sec_name = self.sample.unpacker.get_section(address)
-                print(f"\x1b[31mSection hopping detected into {sec_name}! Address: " + hex(address) + "\x1b[0m")
+                print(f"{Fore.LIGHTRED_EX}Section hopping detected into {sec_name}! "
+                      f"Address: 0x{address:02x}{Fore.RESET}")
                 self.sample.unpacker.allow(address)
                 self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
                 self.pause()
@@ -238,7 +245,7 @@ class UnpackerEngine(object):
                 # print("RET: " + str(ret) + " APICALL_NAME: " + api_call_name)
                 uc.mem_write(self.HOOK_ADDR, struct.pack("<I", ret))
             uc.reg_write(UC_X86_REG_ESP, esp)
-        self.log_instr and print(">>> Tracing instruction at 0x%x, instruction size = 0x%x" % (address, size))
+        self.log_instr and print_single_disass(self.disassembler, self.uc, address, size)
 
         if self.single_instruction:
             self.pause()
@@ -269,7 +276,7 @@ class UnpackerEngine(object):
                     access_type = access_name[6:]  # remove UC_MEM from the access type
                     print(f"Unexpected mem access type {access_type}, addr: 0x{address:02x}")
         if any(lower <= address <= upper for lower, upper in self.mem_breakpoints):
-            print(f"\x1b[31mMemory breakpoint hit! Access {access_type} to 0x{address:02x}")
+            print(f"{Fore.LIGHTRED_EX}Memory breakpoint hit! Access {access_type} to 0x{address:02x}{Fore.RESET}")
             self.pause()
 
     def hook_mem_invalid(self, uc, access, address, size, value, user_data):

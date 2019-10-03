@@ -9,7 +9,10 @@ from random import choice
 from time import time, sleep
 
 import yara
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_OPT_SYNTAX_INTEL, CS_OPT_SYNTAX_ATT
 from cmd2 import Cmd
+from cmd2.plugin import CommandFinalizationData
+from colorama import Fore
 from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, \
     UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
 
@@ -19,7 +22,7 @@ from unipacker.headers import print_dos_header, print_pe_header, print_opt_heade
     print_section_table, \
     pe_write
 from unipacker.io_handler import IOHandler
-from unipacker.utils import get_reg_values, get_string, print_cols, merge, remove_range
+from unipacker.utils import get_reg_values, get_string, print_cols, merge, remove_range, disass_n
 
 _print = builtins.print
 
@@ -42,10 +45,13 @@ class Shell(Cmd, UnpackerClient):
         try:
             Cmd.__init__(self)
             self.allow_cli_args = False
+            self.register_cmdfinalization_hook(self.finalize_hook)
             builtins.print = self.shell_print
             self.histfile = ".unpacker_history"
             self.clear_queue = False
             self.sample = None
+            self.disassembler = Cs(CS_ARCH_X86, CS_MODE_32)
+            self.disassembler.detail = True
             parser = argparse.ArgumentParser(
                 prog='unipacker',
                 description='Automatic and platform-independent unpacker for Windows binaries based on emulation')
@@ -81,11 +87,18 @@ class Shell(Cmd, UnpackerClient):
                     self.sample_loop()
                     self.shell_event.wait()
 
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
                 fortunes = f.read().splitlines()
-            print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
+            print(f"\n{Fore.LIGHTRED_EX}{choice(fortunes)}{Fore.RESET}\n")
             sys.exit(0)
+
+    def finalize_hook(self, data: CommandFinalizationData) -> CommandFinalizationData:
+        if data.statement is None:
+            self.do_exit("")
+            data.stop = True
+            return data
+        return data
 
     def shell_print(self, *args, **kwargs):
         kwargs["file"] = self.stdout
@@ -106,7 +119,7 @@ class Shell(Cmd, UnpackerClient):
 
             with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
                 fortunes = f.read().splitlines()
-            print(f"\n\x1b[31m{choice(fortunes)}\x1b[0m\n")
+            print(f"\n{Fore.LIGHTRED_EX}{choice(fortunes)}{Fore.RESET}\n")
             self.cmdloop()
             if self.clear_queue:
                 break
@@ -125,10 +138,10 @@ class Shell(Cmd, UnpackerClient):
         lines = []
         for i, s in enumerate(known_samples):
             if s == "New sample...":
-                lines += [(f"\t[{i}]", "\x1b[33mNew sample...\x1b[0m", "")]
+                lines += [(f"\t[{i}]", f"{Fore.LIGHTYELLOW_EX}New sample...{Fore.RESET}", "")]
             else:
                 label, name = s.split(";")
-                lines += [(f"\t[{i}]", f"\x1b[34m{label}:\x1b[0m", name)]
+                lines += [(f"\t[{i}]", f"{Fore.LIGHTBLUE_EX}{label}:{Fore.RESET}", name)]
         print_cols(lines)
         print()
 
@@ -182,7 +195,7 @@ class Shell(Cmd, UnpackerClient):
 
     def address_updated(self, address):
         self.address = address
-        self.prompt = f"\x1b[33m[0x{address:02x}]> \x1b[0m"
+        self.prompt = f"{Fore.LIGHTYELLOW_EX}[0x{address:02x}]> {Fore.RESET}"
 
     def continue_emu(self, single_instruction=False):
         self.shell_event.clear()
@@ -245,28 +258,29 @@ class Shell(Cmd, UnpackerClient):
             else:
                 lines_dynamic += [(f"0x{addr:02x}", name, module)]
 
-        print("\n\x1b[31mStatic imports:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}Static imports:{Fore.RESET}")
         print_cols(lines_static)
-        print("\n\x1b[31mDynamic imports:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}Dynamic imports:{Fore.RESET}")
         print_cols(lines_dynamic)
 
     def print_stats(self):
         duration = time() - self.engine.start
         hours, rest = divmod(duration, 3600)
         minutes, seconds = divmod(rest, 60)
-        print(f"\x1b[31mTime wasted emulating:\x1b[0m {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
-        print("\x1b[31mAPI calls:\x1b[0m")
+        print(
+            f"{Fore.LIGHTRED_EX}Time wasted emulating:{Fore.RESET} {int(hours):02} h {int(minutes):02} min {int(seconds):02} s")
+        print(f"{Fore.LIGHTRED_EX}API calls:{Fore.RESET}")
         print_cols([(name, amount) for name, amount in self.engine.apicall_counter.items()])
-        print("\n\x1b[31mInstructions executed in sections:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}Instructions executed in sections:{Fore.RESET}")
         print_cols([(name, amount) for name, amount in self.engine.sections_executed.items()])
-        print("\n\x1b[31mRead accesses:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}Read accesses:{Fore.RESET}")
         print_cols([(name, amount) for name, amount in self.engine.sections_read.items()])
-        print("\n\x1b[31mWrite accesses:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}Write accesses:{Fore.RESET}")
         print_cols([(name, amount) for name, amount in self.engine.sections_written.items()])
 
     def do_aaa(self, args):
         """Analyze absolutely all: Show a collection of stats about the current sample"""
-        print("\x1b[31mFile analysis:\x1b[0m")
+        print(f"{Fore.LIGHTRED_EX}File analysis:{Fore.RESET}")
         print_cols([
             ("YARA:", ", ".join(map(str, self.sample.yara_matches))),
             ("Chosen unpacker:", self.sample.unpacker.__class__.__name__),
@@ -276,7 +290,7 @@ class Shell(Cmd, UnpackerClient):
             ("Section hopping detection:", "active" if self.sample.unpacker.section_hopping_control else "inactive"),
             ("Write+Exec detection:", "active" if self.sample.unpacker.write_execute_control else "inactive")
         ])
-        print("\n\x1b[31mPE stats:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}PE stats:{Fore.RESET}")
         print_cols([
             ("Declared virtual memory size:", f"0x{self.sample.virtualmemorysize:02x}", "", ""),
             ("Actual loaded image size:", f"0x{len(self.sample.loaded_image):02x}", "", ""),
@@ -286,7 +300,7 @@ class Shell(Cmd, UnpackerClient):
             ("Mapped hook space:", f"0x{self.engine.HOOK_ADDR:02x}", "-", f"0x{self.engine.HOOK_ADDR + 0x1000:02x}")
         ])
         self.do_i("i")
-        print("\n\x1b[31mRegister status:\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}Register status:{Fore.RESET}")
         self.do_i("r")
 
     def do_aaaa(self, args):
@@ -458,14 +472,14 @@ Static and dynamic imports are shown with their respective stub addresses in the
     def do_x(self, args):
         """Dump memory at a specific address.
 
-Usage:      x[/n] [{FORMAT}] LOCATION
+Usage:      x [/n] [{FORMAT}] LOCATION
 Options:
     n       integer, how many items should be displayed
 
 Format:     Either 'byte', 'int' (32bit) or 'str' (zero-terminated string)
 
 Location:   address (decimal or hexadecimal form) or a $-prefixed register name (use the register's value as the
-            destination address"""
+            destination address)"""
         try:
             x_regex = re.compile(r"(?:/(\d*) )?(?:{(byte|int|str)} )?(.+)")
             result = x_regex.findall(args)
@@ -484,6 +498,37 @@ Location:   address (decimal or hexadecimal form) or a $-prefixed register name 
                 addr = int(addr, 0)
 
             self.print_mem(addr, n, t, alias)
+        except Exception as e:
+            print(f"Error parsing command: {e}")
+
+    def do_dis(self, args):
+        """Disassemble code at a specific address
+Usage:      dis [/n] [FLAVOR] [@LOCATION]
+Options:
+    n       integer, how many instructions to disassemble
+Flavor:     either 'intel' (default) or 'att' for Intel or AT&T syntax
+Location:   address (decimal or hexadecimal form) or a $-prefixed register name (use the register's value as the
+            destination address). Default: $eip"""
+        try:
+            dis_regex = re.compile(r"(?:/(\d*) ?)?(?:(intel|att) )?(?:@(.+))?")
+            result = dis_regex.findall(args)
+            if not result:
+                print("Error parsing command")
+                return
+            n, flavor, addr = result[0]
+            n = int(n, 0) if n else 1
+            flavor = flavor or "intel"
+            addr = addr or "$eip"
+
+            if "$" in addr:
+                alias = addr[1:]
+                addr = get_reg_values(self.engine.uc)[alias]
+            else:
+                alias = ""
+                addr = int(addr, 0)
+
+            self.disassembler.syntax = CS_OPT_SYNTAX_INTEL if flavor == "intel" else CS_OPT_SYNTAX_ATT
+            disass_n(self.engine.uc, self.disassembler, addr, n, alias)
         except Exception as e:
             print(f"Error parsing command: {e}")
 
@@ -712,7 +757,7 @@ details on this representation)"""
                     self.rules = yara.compile(filepath=f"{os.path.dirname(unipacker.__file__)}/malwrsig.yar")
                     print("Default rules file used: malwrsig.yar")
                 except:
-                    print("\x1b[31mError: malwrsig.yar not found!\x1b[0m")
+                    print(f"{Fore.LIGHTRED_EX}Error: malwrsig.yar not found!{Fore.RESET}")
         else:
             self.rules = yara.compile(filepath=args)
         self.sample.unpacker.dump(self.engine.uc, self.engine.apicall_handler, self.sample)
@@ -727,7 +772,7 @@ details on this representation)"""
             self.shell_event.wait()
         with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
             fortunes = f.read().splitlines()
-        print("\n\x1b[31m" + choice(fortunes) + "\x1b[0m")
+        print(f"\n{Fore.LIGHTRED_EX}{choice(fortunes)}{Fore.RESET}")
         self.exit_code = 0
         return super().do_eof(args)
 

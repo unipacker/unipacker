@@ -504,6 +504,12 @@ class ImageDump(object):
         pe_write(uc, base_addr, total_size, path)
 
 
+class ImportRebuilderDump(ImageDump):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
+        print(dllname_to_functionlist)
+        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
+
 # YZPackDump can use fix_imports_by_rebuilding as well
 class YZPackDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
@@ -511,50 +517,15 @@ class YZPackDump(ImageDump):
         # return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
-class ASPackDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
-
-
-class FSGDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
-
-
-class PEtiteDump(ImageDump):
+class PEtiteDump(ImportRebuilderDump):
     def fix_section_mem_protections(self, hdr, ntp):
         for s in ntp.keys():
             ntp[s] = (True, True, True)
         return super().fix_section_mem_protections(hdr, ntp)
 
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        print(dllname_to_functionlist)
-        #return super().append_original_imports(uc, super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist), original_imp)
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
-
-class MEWDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
-
+class MEWDump(ImportRebuilderDump):
     def fix_section_mem_protections(self, hdr, ntp):
         for section in ntp:
             ntp[section] = (True, True, True)
         return super().fix_section_mem_protections(hdr, ntp)
-
-
-class MPRESSDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
-
-
-class PECompactDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        print(dllname_to_functionlist)
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
-
-
-class UPXDump(ImageDump):
-    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
-        print(dllname_to_functionlist)
-        return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
