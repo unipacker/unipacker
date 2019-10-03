@@ -4,7 +4,7 @@ import sys
 import yara
 
 import unipacker
-from unipacker.imagedump import ImageDump, ImportRebuilderDump, PEtiteDump, MEWDump
+from unipacker.imagedump import ImageDump, ImportRebuilderDump, PEtiteDump, MEWDump, YZPackDump
 from unipacker.utils import InvalidPEFile
 
 
@@ -172,7 +172,7 @@ class YZPackUnpacker(AutomaticDefaultUnpacker):
         self.name = "YZPack"
         self.allowed_sections = ['.yzpack', '.yzpack2']
         self.allowed_addr_ranges = self.get_allowed_addr_ranges()
-        self.dumper = ImportRebuilderDump()
+        self.dumper = YZPackDump()
 
 
 class MEWUnpacker(AutomaticDefaultUnpacker):

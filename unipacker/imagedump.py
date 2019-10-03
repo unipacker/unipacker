@@ -510,6 +510,13 @@ class ImportRebuilderDump(ImageDump):
         return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
 
 
+# YZPackDump can use fix_imports_by_rebuilding as well
+class YZPackDump(ImageDump):
+    def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
+        return super().fix_imports_by_dllname(uc, hdr, total_size, dllname_to_functionlist)
+        # return super().fix_imports_by_rebuilding(uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist)
+
+
 class PEtiteDump(ImportRebuilderDump):
     def fix_section_mem_protections(self, hdr, ntp):
         for s in ntp.keys():
