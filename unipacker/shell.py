@@ -18,6 +18,7 @@ from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EAX, UC_X86_REG_EBX, UC
 
 import unipacker
 from unipacker.core import UnpackerClient, UnpackerEngine, Sample
+from unipacker.gdbserver import GdbServer
 from unipacker.headers import print_dos_header, print_pe_header, print_opt_header, print_all_headers, \
     print_section_table, \
     pe_write
@@ -63,11 +64,15 @@ class Shell(Cmd, UnpackerClient):
                                 help='Group the unpacked files by packer')
             parser.add_argument('-i', '--interactive', action='store_true',
                                 help='Open the chosen sample(s) in the un{i}packer shell')
+            parser.add_argument('--gdb', metavar='PORT', nargs='?', type=int, const=1234,
+                                help='Start the integrated GDB server on the specified port')
             parser.add_argument('--version', action='store_true', help='Show version information and exit')
 
             args = parser.parse_args()
             if args.version:
                 print_version_and_exit()
+            if args.gdb:
+                self.gdb_server = GdbServer(self, args.gdb)
             if args.samples:
                 samples = []
                 for s in args.samples:
@@ -120,7 +125,14 @@ class Shell(Cmd, UnpackerClient):
             with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:
                 fortunes = f.read().splitlines()
             print(f"\n{Fore.LIGHTRED_EX}{choice(fortunes)}{Fore.RESET}\n")
+            self.shell_event.clear()
+            self.engine.single_instruction = True
+            threading.Thread(target=self.engine.emu).start()
+            self.shell_event.wait()
+            if self.gdb_server:
+                self.gdb_server.start()
             self.cmdloop()
+            self.gdb_server.running = False
             if self.clear_queue:
                 break
 

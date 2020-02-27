@@ -8,7 +8,8 @@ from capstone.x86_const import X86_GRP_JUMP
 from colorama import Fore
 from unicorn import unicorn
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EIP, \
-    UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP
+    UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EDI, UC_X86_REG_ESI, UC_X86_REG_EBP, UC_X86_REG_CS, UC_X86_REG_FS, \
+    UC_X86_REG_GS, UC_X86_REG_SS, UC_X86_REG_DS, UC_X86_REG_ES
 
 
 def print_cols(lines):
@@ -171,12 +172,18 @@ def get_reg_values(uc):
         "ebx": uc.reg_read(UC_X86_REG_EBX),
         "ecx": uc.reg_read(UC_X86_REG_ECX),
         "edx": uc.reg_read(UC_X86_REG_EDX),
-        "eip": uc.reg_read(UC_X86_REG_EIP),
-        "esp": uc.reg_read(UC_X86_REG_ESP),
-        "efl": uc.reg_read(UC_X86_REG_EFLAGS),
-        "edi": uc.reg_read(UC_X86_REG_EDI),
         "esi": uc.reg_read(UC_X86_REG_ESI),
-        "ebp": uc.reg_read(UC_X86_REG_EBP)
+        "edi": uc.reg_read(UC_X86_REG_EDI),
+        "ebp": uc.reg_read(UC_X86_REG_EBP),
+        "esp": uc.reg_read(UC_X86_REG_ESP),
+        "eip": uc.reg_read(UC_X86_REG_EIP),
+        "efl": uc.reg_read(UC_X86_REG_EFLAGS),
+        "cs": uc.reg_read(UC_X86_REG_CS),
+        "ss": uc.reg_read(UC_X86_REG_SS),
+        "ds": uc.reg_read(UC_X86_REG_DS),
+        "es": uc.reg_read(UC_X86_REG_ES),
+        "fs": uc.reg_read(UC_X86_REG_FS),
+        "gs": uc.reg_read(UC_X86_REG_GS),
     }
 
 
