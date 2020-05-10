@@ -52,6 +52,8 @@ unipacker
 For detailed instructions on how to use Un{i}packer please refer to the [Wiki](https://github.com/unipacker/unipacker/wiki).
 Additionally, all of the shell commands are documented. To access this information, use the ```help``` command
 
+You can take a quick look at Un{i}packer in action in a (german) [video](https://youtu.be/ee5_JUIEf8Q) by Prof. Chris Dietrich
+
 ### Development mode installation
 Clone the repository, and inside the project root folder activate development mode using ```pip3 install -e .```
 
