@@ -504,6 +504,11 @@ class ImageDump(object):
         pe_write(uc, base_addr, total_size, path)
 
 
+class NoDump(ImageDump):
+    def dump_image(self, uc, base_addr, virtualmemorysize, apicall_handler, sample, path="unpacked.exe"):
+        return
+
+
 class ImportRebuilderDump(ImageDump):
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imp):
         print(dllname_to_functionlist)
