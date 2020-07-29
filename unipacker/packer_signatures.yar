@@ -86,8 +86,9 @@ rule petite{
     strings:
         $petite = ".petite"
         $petite2 = "petite"
+        $a0 = { B8 ?? ?? ?? ?? 66 9C 60 50 8B D8 03 00 68 ?? ?? ?? ?? 6A 00 }  // PeiD Signature
     condition:
-        pe32 and ($petite or $petite2)
+        pe32 and ($petite or $petite2 or ($a0 at pe.entry_point))
 }
 
 rule mew{
