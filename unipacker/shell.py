@@ -52,6 +52,7 @@ class Shell(Cmd, UnpackerClient):
             self.sample = None
             self.disassembler = Cs(CS_ARCH_X86, CS_MODE_32)
             self.disassembler.detail = True
+            self.shell_event = None
             parser = argparse.ArgumentParser(
                 prog='unipacker',
                 description='Automatic and platform-independent unpacker for Windows binaries based on emulation')
@@ -78,14 +79,16 @@ class Shell(Cmd, UnpackerClient):
                 if args.interactive:
                     while True:
                         self.sample_loop(samples)
-                        self.shell_event.wait()
+                        if self.shell_event is not None:
+                            self.shell_event.wait()
                         samples = None
                 else:
                     IOHandler(samples, args.dest, args.partition_by_packer)
             else:
                 while True:
                     self.sample_loop()
-                    self.shell_event.wait()
+                    if self.shell_event is not None:
+                        self.shell_event.wait()
 
         except (EOFError, KeyboardInterrupt):
             with open(f"{os.path.dirname(unipacker.__file__)}/fortunes") as f:

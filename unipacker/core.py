@@ -69,14 +69,16 @@ class Sample(object):
                     try:
                         sample = Sample(os.path.join(root, file), auto_default_unpacker)
                     except InvalidPEFile as e:
-                        print(f"Could not initialize {file}: {e}")
+                        print(f"Could not initialize {file}: This is not a PE file. "
+                              f"Please note that we only support Windows executables at the moment!")
                         continue
                     yield sample
         else:
             try:
                 sample = Sample(path, auto_default_unpacker=False)
             except InvalidPEFile as e:
-                print(f"Could not initialize {path}: {e}")
+                print(f"Could not initialize {path}: This is not a PE file. "
+                      f"Please note that we only support Windows executables at the moment!")
                 return
             yield sample
 

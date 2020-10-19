@@ -262,7 +262,7 @@ class WinApiCalls(object):
             self.breakpoints.add(hook_addr)
             self.pending_breakpoints.remove(proc_name)
 
-        if module_name is not "?":
+        if module_name != "?":
             try:
                 counter = self.load_library_counter[module_name]
                 module_name += "#" + str(counter)
