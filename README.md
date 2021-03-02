@@ -64,3 +64,6 @@ docker run -it -v ~/local_samples:/root/unipacker/local_samples vfsrfs/unipacker
 ```
 Assuming you have a folder called ```local_samples``` in your home directory, this will be mounted inside the container.
 Un{i}packer will thus be able to access those binaries via ```/root/unipacker/local_samples```
+
+### RESTful API
+A 3rd party wrapper created by @rpgeeganage allows to unpack samples by sending a request to a RESTful server: [https://github.com/rpgeeganage/restful4up](https://github.com/rpgeeganage/restful4up)
