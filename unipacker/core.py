@@ -392,7 +392,8 @@ class UnpackerEngine(object):
     def load_dll(self, path_dll, start_addr):
         filename = os.path.splitext(os.path.basename(path_dll))[0]
         if not os.path.exists(f"{os.path.dirname(unipacker.__file__)}/DLLs/{filename}.ldll"):
-            dll = pefile.PE(path_dll)
+            with open(path_dll, "rb") as f:
+                dll = pefile.PE(data=f.read())
             loaded_dll = dll.get_memory_mapped_image(ImageBase=start_addr)
             with open(f"{os.path.dirname(unipacker.__file__)}/DLLs/{filename}.ldll", 'wb') as f:
                 f.write(loaded_dll)
@@ -405,8 +406,9 @@ class UnpackerEngine(object):
                 self.uc.mem_write(start_addr, loaded_dll)
 
     def init_uc(self):
-        # Calculate required memory
-        pe = pefile.PE(self.sample.path)
+        with open(self.sample.path, "rb") as f:
+            pe = pefile.PE(data=f.read())
+
         self.sample.BASE_ADDR = pe.OPTIONAL_HEADER.ImageBase  # 0x400000
         self.sample.unpacker.BASE_ADDR = self.sample.BASE_ADDR
         self.sample.virtualmemorysize = self.getVirtualMemorySize()
