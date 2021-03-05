@@ -132,7 +132,7 @@ class Shell(Cmd, UnpackerClient):
         self.rules = None
         self.address = None
         self.shell_event = threading.Event()
-        self.engine = UnpackerEngine(self.sample)
+        self.engine = UnpackerEngine(self.sample, "unpacked.exe")
         self.engine.register_client(self)
         self.address_updated(self.sample.unpacker.startaddr)
 

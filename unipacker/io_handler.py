@@ -22,17 +22,17 @@ class IOHandler(object):
         client = SimpleClient(event)
         heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
 
-        engine = UnpackerEngine(sample)
+        if partition_by_packer:
+            dest_dir = os.path.join(dest_dir, sample.unpacker.name)
+            os.makedirs(dest_dir, exist_ok=True)
+        dest_file = os.path.join(dest_dir, f"unpacked_{os.path.basename(sample.path)}")
+
+        engine = UnpackerEngine(sample, dest_file)
         engine.register_client(client)
         heartbeat.start()
         threading.Thread(target=engine.emu).start()
         event.wait()
         heartbeat.stop()
         engine.stop()
-        if partition_by_packer:
-            dest_dir = os.path.join(dest_dir, sample.unpacker.name)
-            os.makedirs(dest_dir, exist_ok=True)
-        dest_file = os.path.join(dest_dir, f"unpacked_{os.path.basename(sample.path)}")
         print(f"\nEmulation of {os.path.basename(sample.path)} finished.\n"
-              f"--- Saving to {dest_file} ---\n")
-        shutil.move("unpacked.exe", dest_file)
+              f"--- Saved to {dest_file} ---\n")

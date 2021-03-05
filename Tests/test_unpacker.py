@@ -85,7 +85,7 @@ class EngineTest(TestCase):
         client = SimpleClient(event)
         heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
 
-        engine = UnpackerEngine(sample)
+        engine = UnpackerEngine(sample, "unpacked.exe")
         engine.register_client(client)
         heartbeat.start()
         threading.Thread(target=engine.emu).start()

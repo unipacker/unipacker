@@ -116,8 +116,9 @@ class SimpleClient(UnpackerClient):
 
 class UnpackerEngine(object):
 
-    def __init__(self, sample):
+    def __init__(self, sample, unpack_path):
         self.sample = sample
+        self.unpack_path = unpack_path
         self.clients = []
 
         self.emulator_event = threading.Event()
@@ -207,7 +208,7 @@ class UnpackerEngine(object):
             self.pause()
         if address == self.sample.unpacker.endaddr:
             print(f"{Fore.LIGHTRED_EX}End address hit! Unpacking should be done{Fore.RESET}")
-            self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
+            self.sample.unpacker.dump(uc, self.apicall_handler, self.sample, self.unpack_path)
             self.pause()
 
         if self.sample.unpacker.write_execute_control and address not in self.apicall_handler.hooks and (
@@ -215,7 +216,7 @@ class UnpackerEngine(object):
             if any(lower <= address <= upper for (lower, upper) in sorted(self.write_targets)):
                 print(f"{Fore.LIGHTRED_EX}Trying to execute at 0x{address:02x}, "
                       f"which has been written to before!{Fore.RESET}")
-                self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
+                self.sample.unpacker.dump(uc, self.apicall_handler, self.sample, self.unpack_path)
                 self.pause()
 
         if self.sample.unpacker.section_hopping_control and address not in self.apicall_handler.hooks and address - 0x7 not in self.apicall_handler.hooks and (
@@ -225,7 +226,7 @@ class UnpackerEngine(object):
                 print(f"{Fore.LIGHTRED_EX}Section hopping detected into {sec_name}! "
                       f"Address: 0x{address:02x}{Fore.RESET}")
                 self.sample.unpacker.allow(address)
-                self.sample.unpacker.dump(uc, self.apicall_handler, self.sample)
+                self.sample.unpacker.dump(uc, self.apicall_handler, self.sample, self.unpack_path)
                 self.pause()
 
         curr_section = self.sample.unpacker.get_section(address)
