@@ -13,6 +13,8 @@ from unipacker.utils import alignments, InvalidPEFile, convert_to_string, print_
 
 class ImageDump(object):
 
+    brokenimport_dump_file = ".unipacker_brokenimport.exe"
+
     def fix_section(self, section, next_section_vaddr):
         # sec_name = section.Name.decode().strip("\x00")
         sec_name = convert_to_string(section.Name)
@@ -77,8 +79,8 @@ class ImageDump(object):
     # TODO give options to user if other (valid) addresses are found
     # TODO implement multiple LoadLibrary of same dll
     def fix_imports_by_dllname(self, uc, hdr, total_size, dllname_to_functionlist):
-        pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
-        with open(".unipacker_brokenimport.exe", 'rb') as f:
+        pe_write(uc, hdr.opt_header.ImageBase, total_size, self.brokenimport_dump_file)
+        with open(self.brokenimport_dump_file, 'rb') as f:
             b = f.read()
 
         dllname_to_ptrs = []
@@ -128,14 +130,14 @@ class ImageDump(object):
         hdr.data_directories[1].VirtualAddress = addr - 0xC
         hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
         # Per Dll 1 IMAGE_IMPORT_DESCRIPTOR (THUNK_DATA), Per IMAGE_IMPORT_DESCRIPTOR 5 DWORDS, Size in bytes so time 4
-        os.remove(".unipacker_brokenimport.exe")
+        os.remove(self.brokenimport_dump_file)
         return hdr
 
     def find_iat(self, uc, base_addr, total_size, iat_array, dll_name, offset=0x4):
         # hex = ' '.join('0x%02x' % hx for hx in iat_array)
         # print(f"IAT_ARRAY:{hex}")
-        pe_write(uc, base_addr, total_size, ".unipacker_brokenimport.exe")
-        with open(".unipacker_brokenimport.exe", 'rb') as f:
+        pe_write(uc, base_addr, total_size, self.brokenimport_dump_file)
+        with open(self.brokenimport_dump_file, 'rb') as f:
             b = f.read()
 
         # Part 1: Find all possible ptrs
@@ -319,8 +321,8 @@ class ImageDump(object):
 
     # TODO Dummy
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imports):
-        # pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
-        # with open(".unipacker_brokenimport.exe", 'rb') as f:
+        # pe_write(uc, hdr.opt_header.ImageBase, total_size, self.brokenimport_dump_file)
+        # with open(self.brokenimport_dump_file, 'rb') as f:
         #    b = f.read()
 
         # print(dllname_to_functionlist)
@@ -328,7 +330,7 @@ class ImageDump(object):
         # hdr.data_directories[1].VirtualAddress = 0x60000
         # hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
 
-        # os.remove(".unipacker_brokenimport.exe")
+        # os.remove(self.brokenimport_dump_file)
         return hdr
 
     def chunk_to_image_section_hdr(self, hdr, base_addr, allocated_chunks):
