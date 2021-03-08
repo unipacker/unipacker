@@ -92,7 +92,8 @@ def get_string(ptr, uc, break_on_unprintable=False):
 
 def calc_export_offset_of_dll(dllpath, function_name):
     """This function calculates the offset of exported function of a DLL. It is slow, so hardcoded values are used"""
-    dll = pefile.PE(dllpath)
+    with open(dllpath, 'rb') as rf:
+        dll = pefile.PE(data=rf.read())
     exports = dll.DIRECTORY_ENTRY_EXPORT.symbols
     for e in exports:
         if e.name == bytes(function_name, 'ascii'):

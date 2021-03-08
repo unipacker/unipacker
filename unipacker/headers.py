@@ -1,14 +1,19 @@
+import os
 import struct
+from contextlib import contextmanager
 from ctypes import *
 from datetime import datetime
 
 from colorama import Fore
 from unicorn import UcError
 
-from unipacker.pe_structs import _IMAGE_DOS_HEADER, _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER, IMAGE_SECTION_HEADER, \
-    _IMAGE_DATA_DIRECTORY, IMAGE_IMPORT_DESCRIPTOR, SectionHeader, DosHeader, PEHeader, OptionalHeader, \
-    ImportDescriptor, DataDirectory
-from unipacker.utils import InvalidPEFile, ImportValues, get_string
+from unipacker.pe_structs import (_IMAGE_DATA_DIRECTORY, _IMAGE_DOS_HEADER,
+                                  _IMAGE_FILE_HEADER, _IMAGE_OPTIONAL_HEADER,
+                                  IMAGE_IMPORT_DESCRIPTOR,
+                                  IMAGE_SECTION_HEADER, DataDirectory,
+                                  DosHeader, ImportDescriptor, OptionalHeader,
+                                  PEHeader, SectionHeader)
+from unipacker.utils import ImportValues, InvalidPEFile, get_string
 
 header_sizes = {
     "_IMAGE_DOS_HEADER": len(bytes(_IMAGE_DOS_HEADER())),  # 0x40
@@ -477,10 +482,20 @@ def hdr_write(uc, base_addr, header, array_pos, **fields):
             setattr(header_struct, k, v)
 
 
-def pe_write(uc, base_addr, total_size, filename):
-    data = uc.mem_read(base_addr, total_size)
-    with open(filename, 'wb+') as f:
-        f.write(data)
+class pe_write:
+    def __init__(self, uc, base_addr, total_size, filename, temporary=False):
+        data = uc.mem_read(base_addr, total_size)
+        with open(filename, 'wb+') as f:
+            f.write(data)
+        self.temporary = temporary
+        self.filename = filename
+
+    def __enter__ (self):
+        return self
+
+    def __exit__ (self, exc_type, exc_value, traceback):
+        if self.temporary and os.path.exists(self.filename):
+            os.remove(self.filename)
 
 
 def hdr_read(uc, base_addr, header, field, array_pos=None, str_as_bytes=False):

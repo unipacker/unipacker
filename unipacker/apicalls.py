@@ -112,7 +112,8 @@ class WinApiCalls(object):
         log and print(f"GetModuleHandleA: module_name_ptr 0x{module_name_ptr:02x}: {module_name}")
 
         if not module_name_ptr:
-            pe = pefile.PE(self.sample.path)
+            with open(self.sample.path, 'rb') as rf:
+                pe = pefile.PE(data=rf.read())
             loaded = pe.get_memory_mapped_image(ImageBase=self.base_addr)
             handle = self.alloc(log, len(loaded), uc)
             uc.mem_write(handle, loaded)

@@ -13,6 +13,8 @@ from unipacker.utils import alignments, InvalidPEFile, convert_to_string, print_
 
 class ImageDump(object):
 
+    brokenimport_dump_file = ".unipacker_brokenimport.exe"
+
     def fix_section(self, section, next_section_vaddr):
         # sec_name = section.Name.decode().strip("\x00")
         sec_name = convert_to_string(section.Name)
@@ -77,104 +79,103 @@ class ImageDump(object):
     # TODO give options to user if other (valid) addresses are found
     # TODO implement multiple LoadLibrary of same dll
     def fix_imports_by_dllname(self, uc, hdr, total_size, dllname_to_functionlist):
-        pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
-        with open(".unipacker_brokenimport.exe", 'rb') as f:
-            b = f.read()
+        with pe_write(uc, hdr.opt_header.ImageBase, total_size, self.brokenimport_dump_file, temporary=True):
+            with open(self.brokenimport_dump_file, 'rb') as f:
+                b = f.read()
 
-        dllname_to_ptrs = []
+            dllname_to_ptrs = []
 
-        for k in dllname_to_functionlist.keys():
-            k = k.split('#')[0]
-            dllname_to_ptrs.append((k, self.locate_ptr_to_occurences(b, self.find_occurences(b, k))))
+            for k in dllname_to_functionlist.keys():
+                k = k.split('#')[0]
+                dllname_to_ptrs.append((k, self.locate_ptr_to_occurences(b, self.find_occurences(b, k))))
 
-        if len(dllname_to_ptrs) == 1 and len(dllname_to_ptrs[0][1]) == 1:
-            addr = dllname_to_ptrs[0][1]
-        elif len(dllname_to_ptrs) == 1:
-            # TODO Try Fix Imports by Imported Function Names
-            print("FAILED here")
-            return None  # FAILED
-        else:
-            for i in range(len(dllname_to_ptrs) - 1):
-                addrlist = dllname_to_ptrs[i][1]
-                addrlist2 = dllname_to_ptrs[i + 1][1]
-                a1, a2 = self.search_offset_two(addrlist, addrlist2, 0x14)
-                if a1 is not None and a2 is not None:
-                    break
-
-            if a1 is None and a2 is None:
-                print(f"FAILED a1: {a1}, a2: {a2}")
+            if len(dllname_to_ptrs) == 1 and len(dllname_to_ptrs[0][1]) == 1:
+                addr = dllname_to_ptrs[0][1]
+            elif len(dllname_to_ptrs) == 1:
+                # TODO Try Fix Imports by Imported Function Names
+                print("FAILED here")
                 return None  # FAILED
+            else:
+                for i in range(len(dllname_to_ptrs) - 1):
+                    addrlist = dllname_to_ptrs[i][1]
+                    addrlist2 = dllname_to_ptrs[i + 1][1]
+                    a1, a2 = self.search_offset_two(addrlist, addrlist2, 0x14)
+                    if a1 is not None and a2 is not None:
+                        break
 
-            dllname_to_ptrs[0] = (dllname_to_ptrs[0][0], [a1])
-            dllname_to_ptrs[1] = (dllname_to_ptrs[1][0], [a2])
+                if a1 is None and a2 is None:
+                    print(f"FAILED a1: {a1}, a2: {a2}")
+                    return None  # FAILED
 
-            offset = 0x14
+                dllname_to_ptrs[0] = (dllname_to_ptrs[0][0], [a1])
+                dllname_to_ptrs[1] = (dllname_to_ptrs[1][0], [a2])
 
-            for i in range(len(dllname_to_ptrs)):
-                if i + 1 < len(dllname_to_ptrs):
-                    cmp = dllname_to_ptrs[i][1][0]
-                    val = None
-                    for e in dllname_to_ptrs[i + 1][1]:
-                        if cmp + 0x14 == e:
-                            val = e
-                    dllname_to_ptrs[i + 1] = (dllname_to_ptrs[i + 1][0], [val])
+                offset = 0x14
 
-            # select pointer
-            addr = dllname_to_ptrs[0][1][0]
-            for i in range(len(dllname_to_ptrs)):
-                if addr > dllname_to_ptrs[i][1][0]:
-                    addr = dllname_to_ptrs[i][1][0]
+                for i in range(len(dllname_to_ptrs)):
+                    if i + 1 < len(dllname_to_ptrs):
+                        cmp = dllname_to_ptrs[i][1][0]
+                        val = None
+                        for e in dllname_to_ptrs[i + 1][1]:
+                            if cmp + 0x14 == e:
+                                val = e
+                        dllname_to_ptrs[i + 1] = (dllname_to_ptrs[i + 1][0], [val])
 
-        hdr.data_directories[1].VirtualAddress = addr - 0xC
-        hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
-        # Per Dll 1 IMAGE_IMPORT_DESCRIPTOR (THUNK_DATA), Per IMAGE_IMPORT_DESCRIPTOR 5 DWORDS, Size in bytes so time 4
-        os.remove(".unipacker_brokenimport.exe")
-        return hdr
+                # select pointer
+                addr = dllname_to_ptrs[0][1][0]
+                for i in range(len(dllname_to_ptrs)):
+                    if addr > dllname_to_ptrs[i][1][0]:
+                        addr = dllname_to_ptrs[i][1][0]
+
+            hdr.data_directories[1].VirtualAddress = addr - 0xC
+            hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
+            # Per Dll 1 IMAGE_IMPORT_DESCRIPTOR (THUNK_DATA), Per IMAGE_IMPORT_DESCRIPTOR 5 DWORDS, Size in bytes so time 4
+            return hdr
 
     def find_iat(self, uc, base_addr, total_size, iat_array, dll_name, offset=0x4):
         # hex = ' '.join('0x%02x' % hx for hx in iat_array)
         # print(f"IAT_ARRAY:{hex}")
-        pe_write(uc, base_addr, total_size, ".unipacker_brokenimport.exe")
-        with open(".unipacker_brokenimport.exe", 'rb') as f:
-            b = f.read()
+        with pe_write(uc, base_addr, total_size, self.brokenimport_dump_file, temporary=True):
+            with open(self.brokenimport_dump_file, 'rb') as f:
+                b = f.read()
 
-        # Part 1: Find all possible ptrs
+            # Part 1: Find all possible ptrs
 
-        possible_ptrs = []
-        for iat_entry in iat_array:
-            found_ptr = -1
-            possible_addr = []
-            while True:
-                found_ptr = b.find(struct.pack("I", iat_entry), (found_ptr + 1), len(b))
-                if found_ptr == -1:
-                    break
-                else:
-                    possible_addr.append(found_ptr)
+            possible_ptrs = []
+            for iat_entry in iat_array:
+                found_ptr = -1
+                possible_addr = []
+                while True:
+                    found_ptr = b.find(struct.pack("I", iat_entry), (found_ptr + 1), len(b))
+                    if found_ptr == -1:
+                        break
+                    else:
+                        possible_addr.append(found_ptr)
 
-            possible_ptrs.append(possible_addr)
+                possible_ptrs.append(possible_addr)
 
-        # Part 2: Validate with offset
-        if len(possible_ptrs) == 1:
-            if len(possible_ptrs[0]) == 0:
-                return None
-            return possible_ptrs[0][0]  # TODO Default first check with allocated section
-        ptrs = []
-        for i in range(len(possible_ptrs) - 1):
-            l1 = possible_ptrs[i]
-            l2 = possible_ptrs[i + 1]
-            a1, a2 = self.search_offset_two(l1, l2, offset)
-            if a1 is None:
-                print("Not Found!")
-            ptrs.append(a1)
+            # Part 2: Validate with offset
+            if len(possible_ptrs) == 1:
+                if len(possible_ptrs[0]) == 0:
+                    return None
+                return possible_ptrs[0][0]  # TODO Default first check with allocated section
+            ptrs = []
+            for i in range(len(possible_ptrs) - 1):
+                l1 = possible_ptrs[i]
+                l2 = possible_ptrs[i + 1]
+                a1, a2 = self.search_offset_two(l1, l2, offset)
+                if a1 is None:
+                    print("Not Found!")
+                ptrs.append(a1)
 
-        lx = possible_ptrs[-1]
-        for elem in lx:
-            if elem - offset == ptrs[-1]:
-                ptrs.append(elem)
+            lx = possible_ptrs[-1]
+            for elem in lx:
+                if elem - offset == ptrs[-1]:
+                    ptrs.append(elem)
 
-        # print_addr_list(f"Printing possible ptrs for {dll_name}: ", ptrs)
+            # print_addr_list(f"Printing possible ptrs for {dll_name}: ", ptrs)
 
-        return ptrs[0]
+            return ptrs[0]
 
     def patch_iat(self, uc, base_addr, patches, ptr_to_iat, offset=0x4):
         for p in patches:
@@ -319,8 +320,8 @@ class ImageDump(object):
 
     # TODO Dummy
     def fix_imports(self, uc, hdr, virtualmemorysize, total_size, dllname_to_functionlist, original_imports):
-        # pe_write(uc, hdr.opt_header.ImageBase, total_size, ".unipacker_brokenimport.exe")
-        # with open(".unipacker_brokenimport.exe", 'rb') as f:
+        # pe_write(uc, hdr.opt_header.ImageBase, total_size, self.brokenimport_dump_file)
+        # with open(self.brokenimport_dump_file, 'rb') as f:
         #    b = f.read()
 
         # print(dllname_to_functionlist)
@@ -328,7 +329,7 @@ class ImageDump(object):
         # hdr.data_directories[1].VirtualAddress = 0x60000
         # hdr.data_directories[1].Size = len(dllname_to_functionlist) * 5 * 4
 
-        # os.remove(".unipacker_brokenimport.exe")
+        # os.remove(self.brokenimport_dump_file)
         return hdr
 
     def chunk_to_image_section_hdr(self, hdr, base_addr, allocated_chunks):

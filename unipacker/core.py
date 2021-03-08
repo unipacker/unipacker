@@ -119,6 +119,8 @@ class UnpackerEngine(object):
     def __init__(self, sample, unpack_path):
         self.sample = sample
         self.unpack_path = unpack_path
+        dumper = sample.unpacker.dumper.brokenimport_dump_file = unpack_path + \
+            ".unipacker_brokenimport.tmp"
         self.clients = []
 
         self.emulator_event = threading.Event()
