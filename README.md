@@ -7,7 +7,7 @@
                   \_\     /_/ | |
                               |_|
 
-# Un{i}packer   [![PyPI: unipacker](https://badge.fury.io/py/unipacker.svg)](https://pypi.org/project/unipacker/) [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/vfsrfs/unipacker.svg)](https://hub.docker.com/r/vfsrfs/unipacker)
+# Un{i}packer   [![PyPI: unipacker](https://badge.fury.io/py/unipacker.svg)](https://pypi.org/project/unipacker/) [![Docker Cloud Build Status](https://img.shields.io/docker/cloud/build/vfsrfs/unipacker.svg)](https://hub.docker.com/r/vfsrfs/unipacker) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4603157.svg)](https://doi.org/10.5281/zenodo.4603157)
 
 | | |
 |---|---|
