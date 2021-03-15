@@ -11,8 +11,8 @@
 
 | | |
 |---|---|
-| Master  | [![Build Status](https://travis-ci.org/unipacker/unipacker.svg?branch=master)](https://travis-ci.org/unipacker/unipacker) |
-| Dev  | [![Build Status](https://travis-ci.org/unipacker/unipacker.svg?branch=dev)](https://travis-ci.org/unipacker/unipacker) |
+| Master  | [![Build Status](https://travis-ci.com/unipacker/unipacker.svg?branch=master)](https://travis-ci.com/github/unipacker/unipacker) |
+| Dev  | [![Build Status](https://travis-ci.com/unipacker/unipacker.svg?branch=dev)](https://travis-ci.com/github/unipacker/unipacker) |
 
 ## Unpacking PE files using Unicorn Engine
 
