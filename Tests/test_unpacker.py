@@ -1,14 +1,15 @@
 import hashlib
+import multiprocessing
 import os
 import sys
 import threading
 from unittest import TestCase
 
 from colorama import Fore
-
-from unipacker.core import UnpackerEngine, Sample, SimpleClient
+from unipacker.core import Sample, SimpleClient, UnpackerEngine
 from unipacker.unpackers import get_unpacker
 from unipacker.utils import RepeatedTimer
+from pathlib import Path
 
 
 def calc_md5(sample):
@@ -58,10 +59,8 @@ class IntegrityTest(TestCase):
                         print(f"\"{(rt2 + '/' + f).split('Sample/')[1]}\": \"{calc_md5(rt2 + '/' + f).hexdigest()}\",")
 
     def test_integrity(self):
-        curr_path = os.getcwd()
-        if "Tests" in curr_path:
-            os.chdir(curr_path.split("Tests")[0])
-        for rt, dir, _ in os.walk(os.getcwd() + "/Sample/"):
+        sample_path = Path(__file__).parent.parent.joinpath('Sample')
+        for rt, dir, _ in os.walk(str(sample_path)):
             for d in dir:
                 for rt2, dir2, f2 in os.walk(rt + d):
                     for f in f2:
@@ -75,24 +74,31 @@ class IntegrityTest(TestCase):
                                         f"Tested file: {relative_test_path}. Expected: {self.hashes[relative_test_path]}, got: {calc_md5(test_path).hexdigest()}")
                         print(f"Tested:{relative_test_path}, MD5: {calc_md5(test_path).hexdigest()}")
 
+def _unpack(t):
+    file, unpacked_file = t
+    unpacked = file + '.unpacked'
+    # if os.path.exists(unpacked):
+    #     os.remove(unpacked)
+    sample = Sample(file)
+    event = threading.Event()
+    client = SimpleClient(event)
+    heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
+
+    engine = UnpackerEngine(sample, unpacked)
+    engine.register_client(client)
+    heartbeat.start()
+    threading.Thread(target=engine.emu).start()
+    event.wait()
+    heartbeat.stop()
+    engine.stop()
+    assert os.path.exists(unpacked)
+    assert not os.path.exists(sample.unpacker.dumper.brokenimport_dump_file)
+    if os.path.exists(unpacked):
+        return file, calc_md5(unpacked).hexdigest(), calc_md5(unpacked_file).hexdigest()
+    else:
+        return file, '', calc_md5(unpacked_file) 
 
 class EngineTest(TestCase):
-
-    def prepare_test(self, sample_path):
-        sample = Sample(sample_path)
-        unpacker, _ = get_unpacker(sample)
-        event = threading.Event()
-        client = SimpleClient(event)
-        heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
-
-        engine = UnpackerEngine(sample, "unpacked.exe")
-        engine.register_client(client)
-        heartbeat.start()
-        threading.Thread(target=engine.emu).start()
-        event.wait()
-        heartbeat.stop()
-        engine.stop()
-        print(f"\n--- Emulation of {os.path.basename(sample_path)} finished ---")
 
     def perform_test(self, packer, ignore):
         curr_path = os.getcwd()
@@ -101,15 +107,17 @@ class EngineTest(TestCase):
         sample = "Sample/"
         directory = sample + packer
         hashes = []
-        for file in os.listdir(directory):
-            if file in ignore:
-                print(f"{file} not supported")
-                continue
-            print(f"Testing file: {file}")
-            self.prepare_test(directory + file)
-            new_md5 = calc_md5("unpacked.exe").hexdigest()
-            old_md5 = calc_md5("Tests/UnpackedSample/" + packer + "unpacked_" + file).hexdigest()
-            hashes.append((file, old_md5, new_md5))
+
+        files = [f for f in os.listdir(directory) if f not in ignore]
+        files_unpacked = ["Tests/UnpackedSample/" + packer + "unpacked_" + f for f in files]
+        files = [directory + f for f in files]
+        tuples = list(zip(files, files_unpacked))
+
+        with multiprocessing.Pool(
+            processes=min(multiprocessing.cpu_count(), 12)) as pool:
+            for file, new_md5, old_md5 in pool.imap_unordered(_unpack, tuples):
+                hashes.append((file, old_md5, new_md5))
+
         print(f"\n--- Done, checking for success ---")
         return hashes
 
