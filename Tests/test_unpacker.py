@@ -3,13 +3,14 @@ import multiprocessing
 import os
 import sys
 import threading
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from colorama import Fore
+
 from unipacker.core import Sample, SimpleClient, UnpackerEngine
-from unipacker.unpackers import get_unpacker
 from unipacker.utils import RepeatedTimer
-from pathlib import Path
 
 
 def calc_md5(sample):
@@ -74,29 +75,30 @@ class IntegrityTest(TestCase):
                                         f"Tested file: {relative_test_path}. Expected: {self.hashes[relative_test_path]}, got: {calc_md5(test_path).hexdigest()}")
                         print(f"Tested:{relative_test_path}, MD5: {calc_md5(test_path).hexdigest()}")
 
-def _unpack(t):
-    file, unpacked_file = t
-    unpacked = file + '.unpacked'
-    # if os.path.exists(unpacked):
-    #     os.remove(unpacked)
-    sample = Sample(file)
-    event = threading.Event()
-    client = SimpleClient(event)
-    heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
 
-    engine = UnpackerEngine(sample, unpacked)
-    engine.register_client(client)
-    heartbeat.start()
-    threading.Thread(target=engine.emu).start()
-    event.wait()
-    heartbeat.stop()
-    engine.stop()
-    assert os.path.exists(unpacked)
-    assert not os.path.exists(sample.unpacker.dumper.brokenimport_dump_file)
-    if os.path.exists(unpacked):
-        return file, calc_md5(unpacked).hexdigest(), calc_md5(unpacked_file).hexdigest()
-    else:
-        return file, '', calc_md5(unpacked_file) 
+def _unpack(t):
+    with TemporaryDirectory() as unpack_dir:
+        file, unpacked_file = t
+        unpacked = f"{unpack_dir}/unpacked.exe"
+        sample = Sample(file)
+        event = threading.Event()
+        client = SimpleClient(event)
+        heartbeat = RepeatedTimer(120, print, "- still running -", file=sys.stderr)
+
+        engine = UnpackerEngine(sample, unpacked)
+        engine.register_client(client)
+        heartbeat.start()
+        threading.Thread(target=engine.emu).start()
+        event.wait()
+        heartbeat.stop()
+        engine.stop()
+        assert os.path.exists(unpacked)
+        assert not os.path.exists(sample.unpacker.dumper.brokenimport_dump_file)
+        if os.path.exists(unpacked):
+            return file, calc_md5(unpacked).hexdigest(), calc_md5(unpacked_file).hexdigest()
+        else:
+            return file, '', calc_md5(unpacked_file)
+
 
 class EngineTest(TestCase):
 
@@ -114,7 +116,7 @@ class EngineTest(TestCase):
         tuples = list(zip(files, files_unpacked))
 
         with multiprocessing.Pool(
-            processes=min(multiprocessing.cpu_count(), 12)) as pool:
+                processes=min(multiprocessing.cpu_count(), 12)) as pool:
             for file, new_md5, old_md5 in pool.imap_unordered(_unpack, tuples):
                 hashes.append((file, old_md5, new_md5))
 

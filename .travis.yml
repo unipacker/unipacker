@@ -8,7 +8,7 @@ matrix:
     dist: xenial          # required for Python >= 3.7
     cache: pip
     install:
-        - pip install --upgrade pip setuptools pytest wheel twine
+        - pip install --upgrade pip setuptools pytest-xdist wheel twine
         - pip install -e .
     deploy:
       provider: pypi
@@ -24,7 +24,7 @@ matrix:
     osx_image: xcode10.2  # Python 3.7.2 running on macOS 10.14.3
     language: shell       # 'language: python' is an error on Travis CI macOS
     install:
-        - pip3 install --upgrade pip setuptools pytest wheel twine
+        - pip3 install --upgrade pip setuptools pytest-xdist wheel twine
         - pip3 install -e .
   - name: Python 3.7.3 on Windows
     os: windows           # Windows 10.0.17134 N/A Build 17134
@@ -32,10 +32,10 @@ matrix:
     before_install: choco install python make
     env: PATH=/c/Python37:/c/Python37/Scripts:$PATH
     install:
-        - pip3 install --user --upgrade pip setuptools pytest wheel twine
+        - pip3 install --user --upgrade pip setuptools pytest-xdist wheel twine
         - pip3 install --user -e .
   allow_failures:
   - os: windows
 
 script:
-- python3 -m pytest -s || python -m pytest -s
+- python3 -m pytest -s -n $((($(getconf _NPROCESSORS_ONLN)+1)/2)) || python -m pytest -s -n $((($(getconf _NPROCESSORS_ONLN)+1)/2))
