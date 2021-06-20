@@ -42,6 +42,21 @@ aren't specifically known you will be asked whether you would like to manually s
 If you would like to start at the entry point declared in the PE header and just emulate until section hopping is detected,
 press ```Enter```
 
+## Showcase
+We are humbled to see some active usage of Un{i}packer for research projects and university courses that teach students about malware obfuscation:
+
+- [Tutorial video](https://youtu.be/ee5_JUIEf8Q) belonging to the Master's course "Malware Analysis and Cyber Threat Intelligence" at the Westphalian University,
+  demonstrating how to analyze obfuscated malware with Un{i}packer
+- [DeepReflect](https://www.usenix.org/conference/usenixsecurity21/presentation/downing): Paper presenting a tool for localizing and identifying malware
+  components within a malicious binary. Its dataset relies on a Un{i}packer preprocessing step
+- [BDHunter](https://dl.acm.org/doi/abs/10.1145/3433210.3457894): Paper describing a system that automatically identifies behavior dispatchers to assist triggering malicious behaviors.
+  The tool requires unpacked malware samples as input, where the authors propose using Un{i}packer
+- [JARV1S Disassembler](https://github.com/L1NNA/JARV1S-Disassembler): Disassembler that uses Un{i}packer as a preprocessing step
+- [Anti-Anti-Virus 2](https://www.cs.virginia.edu/~cr4bd/4630/S2021/slides/20210301-slides.pdf) lecture of University of Virginia's "CS 4630: Defense Against the Dark Arts",
+  using Un{i}packer as an example for unpacking techniques
+
+If you are using Un{i}packer for additional projects and would like them featured in this list, we would love to hear from you!
+
 ## Usage
 ### Normal installation
 Install the [YARA](https://github.com/VirusTotal/yara) package for your OS, get Un{i}packer from PyPi and start it using the automatically created command line wrapper:
