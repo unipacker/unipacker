@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Presa Schnell"
+  given-names: "Christian"
+  orcid: "https://orcid.org/0000-0003-0930-6279"
+- family-names: "Hopstock"
+  given-names: "Samuel"
+  orcid: "https://orcid.org/0000-0003-4708-7265"
+title: "Un{i}packer"
+version: 1.0.6
+doi: 10.5281/zenodo.4603157
+date-released: 2021-03-13
+url: "https://github.com/unipacker/unipacker"
