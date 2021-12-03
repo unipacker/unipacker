@@ -95,9 +95,10 @@ rule mew{
         description = "MEW packed file"
         date = "2019-01-25"
     strings:
-        $mew = "MEW"
+        $mew1 = "MEW"
+        $mew2 = {50 72 6F 63 41 64 64 72 65 73 73 00 E9 [6-7] 00 00 00 00 00 00 00 00 00 [7] 00}
     condition:
-        pe32 and $mew
+        pe32 and ( $mew1 and $mew2 )
 }
 
 
