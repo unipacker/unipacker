@@ -16,14 +16,15 @@ from unipacker.apicalls import WinApiCalls
 from unipacker.headers import PE, get_disk_headers, conv_to_class_header, parse_disk_to_header
 from unipacker.kernel_structs import TEB, PEB, PEB_LDR_DATA, LIST_ENTRY
 from unipacker.pe_structs import SectionHeader, IMAGE_SECTION_HEADER, ImportDescriptor, Import
-from unipacker.unpackers import get_unpacker
+from unipacker.unpackers import get_unpacker, DEFAULT_YARA_PATH
 from unipacker.utils import merge, align, convert_to_string, InvalidPEFile, print_single_disass
 
 
 class Sample(object):
 
-    def __init__(self, path, auto_default_unpacker=True):
+    def __init__(self, path, yara_path=DEFAULT_YARA_PATH, auto_default_unpacker=True):
         self.path = path
+        self.yara_path = yara_path
         self.init_headers()
         self.imports = set()
         self.dllname_to_functionlist = collections.OrderedDict()  # dll_name -> [(name/ordinal, addr), ...]

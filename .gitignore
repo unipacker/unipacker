@@ -112,3 +112,4 @@ __pycache__
 /**/.unpacker_history
 /**/unpacked.exe
 /**/.unipacker_brokenimport.exe
+*.egg-info

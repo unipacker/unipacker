@@ -7,9 +7,10 @@ import unipacker
 from unipacker.imagedump import ImageDump, ImportRebuilderDump, PEtiteDump, MEWDump, YZPackDump
 from unipacker.utils import InvalidPEFile
 
+DEFAULT_YARA_PATH = f"{os.path.dirname(unipacker.__file__)}/packer_signatures.yar"
+
 
 class DefaultUnpacker(object):
-
     def __init__(self, sample):
         self.name = "unknown"
         self.sample = sample
@@ -228,31 +229,19 @@ def identifypacker(sample, yar):
     return result, matches
 
 
-def generate_label(l):
-    if 'upx' in str(l):
-        return 'upx'
-    elif "petite" in str(l):
-        return "petite"
-    elif 'mew' in str(l):
-        return 'mew'
-    elif 'mpress' in str(l):
-        return 'mpress'
-    elif "aspack" in str(l):
-        return "aspack"
-    elif "fsg" in str(l):
-        return "fsg"
-    elif "pecompact" in str(l):
-        return "pecompact"
-    elif "upack" in str(l):
-        return "upack"
-    elif "yzpack" in str(l):
-        return "yzpack"
-    else:
-        return 'unknown'
+def generate_label(match):
+    labels = [
+        'upx', 'petite', 'mew', 'mpress', 'aspack',
+        'fsg', 'pecompact', 'upack', 'yzpack'
+    ]
+    for packer in labels:
+        if packer in str(match):
+            return packer
+    return 'unknown'
 
 
 def get_unpacker(sample, auto_default_unpacker=True):
-    yar = f"{os.path.dirname(unipacker.__file__)}/packer_signatures.yar"
+    yar = sample.yara_path
     packer, yara_matches = identifypacker(sample.path, yar)
     packers = {
         "upx": UPXUnpacker,
