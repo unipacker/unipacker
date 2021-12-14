@@ -68,7 +68,7 @@ class Sample(object):
             for root, dirs, files in os.walk(path):
                 for file in files:
                     try:
-                        sample = Sample(os.path.join(root, file), auto_default_unpacker)
+                        sample = Sample(os.path.join(root, file), auto_default_unpacker=auto_default_unpacker)
                     except InvalidPEFile as e:
                         print(f"Could not initialize {file}: This is not a PE file. "
                               f"Please note that we only support Windows executables at the moment!")
