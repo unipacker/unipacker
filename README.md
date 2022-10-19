@@ -43,7 +43,7 @@ If you would like to start at the entry point declared in the PE header and just
 press ```Enter```
 
 ## Showcase
-We are humbled to see some active usage of Un{i}packer for research projects and university courses that teach students about malware obfuscation:
+We are humbled to see some active usage of Un{i}packer for research projects, university courses and other resources that teach students about malware obfuscation:
 
 - [Tutorial video](https://youtu.be/ee5_JUIEf8Q) belonging to the Master's course "Malware Analysis and Cyber Threat Intelligence" at the Westphalian University,
   demonstrating how to analyze obfuscated malware with Un{i}packer
@@ -54,6 +54,8 @@ We are humbled to see some active usage of Un{i}packer for research projects and
 - [JARV1S Disassembler](https://github.com/L1NNA/JARV1S-Disassembler): Disassembler that uses Un{i}packer as a preprocessing step
 - [Anti-Anti-Virus 2](https://www.cs.virginia.edu/~cr4bd/4630/S2021/slides/20210301-slides.pdf) lecture of University of Virginia's "CS 4630: Defense Against the Dark Arts",
   using Un{i}packer as an example for unpacking techniques
+- [Mastering Malware Analysis](https://www.amazon.com/Mastering-Malware-Analysis-practical-cybercrime/dp/1803240245): The second edition of this comprehensive guide to malware analysis by
+  Alexey Kleymenov and Amr Thabet also explains how unpacking and deobfuscation works, mentioning Un{i}packer as a suitable tool for several popular packers
 
 If you are using Un{i}packer for additional projects and would like them featured in this list, we would love to hear from you!
 
