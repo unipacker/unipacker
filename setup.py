@@ -10,7 +10,7 @@ with open('README.md') as readme_file:
 setup(
     name=__NAME__,
     version=__VERSION__,
-    python_requires='>=3.6',
+    python_requires='>=3.10',
     author='Un{i}packer Team',
     author_email='masrepus97@gmail.com',
     description='Automatic and platform-independent unpacker for Windows binaries based on emulation',
@@ -23,7 +23,7 @@ setup(
     install_requires=[
         'yara-python',
         'pefile',
-        'cmd2==0.9.12',
+        'cmd2==2.0.0',
         'unicorn-unipacker==1.0.3b7',
         'capstone',
         'colorama',
