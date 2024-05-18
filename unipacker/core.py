@@ -438,7 +438,7 @@ class UnpackerEngine(object):
         self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
         if self.sample.unpacker.startaddr is None:
             self.sample.unpacker.startaddr = self.entrypoint(pe)
-        self.sample.loaded_image = pe.get_memory_mapped_image(ImageBase=self.sample.BASE_ADDR)
+        self.sample.loaded_image = bytes(pe.get_memory_mapped_image(ImageBase=self.sample.BASE_ADDR))
         self.sample.virtualmemorysize = align(self.sample.virtualmemorysize + 0x10000,
                                               page_size=4096)  # Space possible IAT rebuilding
         self.sample.unpacker.virtualmemorysize = self.sample.virtualmemorysize
