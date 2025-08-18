@@ -56,6 +56,8 @@ We are humbled to see some active usage of Un{i}packer for research projects, un
   using Un{i}packer as an example for unpacking techniques
 - [Mastering Malware Analysis](https://www.amazon.com/Mastering-Malware-Analysis-practical-cybercrime/dp/1803240245): The second edition of this comprehensive guide to malware analysis by
   Alexey Kleymenov and Amr Thabet also explains how unpacking and deobfuscation works, mentioning Un{i}packer as a suitable tool for several popular packers
+- [Malflow](https://link.springer.com/chapter/10.1007/978-981-96-3531-3_9): Paper presenting a static analysis method to classify malware families. Its dataset relies, among others, on a Un{i}packer preprocessing step. The authors publish the experiment's full dataset on [Kaggle](https://www.kaggle.com/datasets/amester/malflow), containing analysis of unpacked samples from BODMAS: Radare2 disassembled objects, instructions statistics, malware transformed into RGB images, and more.
+- [PhD research](https://attilamester.github.io/call-graph/): thesis and related static analysis research projects, some of them using Un{i}packer for malware preprocessing. 
 
 If you are using Un{i}packer for additional projects and would like them featured in this list, we would love to hear from you!
 
