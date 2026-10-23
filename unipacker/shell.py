@@ -43,8 +43,7 @@ class Shell(Cmd, UnpackerClient):
 
     def __init__(self):
         try:
-            Cmd.__init__(self)
-            self.allow_cli_args = False
+            Cmd.__init__(self, allow_cli_args=False)
             self.register_cmdfinalization_hook(self.finalize_hook)
             builtins.print = self.shell_print
             self.histfile = ".unpacker_history"
